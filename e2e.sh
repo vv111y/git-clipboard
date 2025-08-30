@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# e2e.sh: End-to-end tests for git-clipboard (git-cut and git-paste)
+# Creates temporary repos, commits sample content, cuts a subset, and pastes into a target repo.
+# Prints JSON and key git logs to validate behavior. Exits non-zero on failures.
+
+set -euo pipefail
+
+TMP_ROOT="$(mktemp -d -t gc-e2e-XXXX)"
+SRC="$TMP_ROOT/src"
+DST="$TMP_ROOT/dst"
+CLIPS="$TMP_ROOT/clips"
+DST2="$TMP_ROOT/dst2"
+
+cleanup() {
+  rm -rf "$TMP_ROOT"
+}
+trap cleanup EXIT
+
+mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2"
+
+git -C "$SRC" init -q
+mkdir -p "$SRC/proj/a" "$SRC/proj/b"
+echo one > "$SRC/proj/a/file1.txt"
+echo two > "$SRC/proj/b/file2.txt"
+git -C "$SRC" add .
+git -C "$SRC" commit -qm "init"
+
+echo three > "$SRC/proj/a/file3.txt"
+git -C "$SRC" add .
+git -C "$SRC" commit -qm "feat: add file3"
+
+# Cut only proj/a into a clip under subdir 'imported'
+CLIP_NAME="clip-test"
+"$(pwd)/git-cut" proj/a --repo "$SRC" --to-subdir imported --out-dir "$CLIPS" --name "$CLIP_NAME"
+
+# Verify outputs exist
+[ -s "$CLIPS/$CLIP_NAME.bundle" ]
+[ -s "$CLIPS/$CLIP_NAME.json" ]
+
+# Dry-run paste into target
+git -C "$DST" init -q
+"$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --dry-run --merge | sed -n '1,120p'
+
+# Actual paste: import branch then (no commits, so create initial commit and merge)
+git -C "$DST" commit --allow-empty -qm "chore: initial"
+"$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --merge --allow-unrelated-histories --message "Import clip"
+
+echo "== Log after merge =="
+git -C "$DST" log --graph --oneline --decorate -n 10
+
+echo "== Tree =="
+git -C "$DST" ls-tree -r --name-only HEAD | sed -n '1,40p'
+
+# Scenario 2: Squash import into a new target repo
+git -C "$DST2" init -q
+git -C "$DST2" commit --allow-empty -qm "chore: initial"
+"$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST2" --merge --squash --allow-unrelated-histories --message "Squash Import"
+echo "== Squash Log =="
+git -C "$DST2" log --oneline -n 3 | sed -n '1,3p'
+echo "== Squash Tree =="
+git -C "$DST2" ls-tree -r --name-only HEAD | sed -n '1,40p'
+
+# Scenario 3: Conflict preview after diverging changes (now branches share history)
+git -C "$DST" checkout master -q
+echo "local" >> "$DST/imported/proj/a/file1.txt"
+git -C "$DST" add -A && git -C "$DST" commit -qm "local: change file1"
+git -C "$DST" checkout clip/clip-test -q
+echo "clip" >> "$DST/imported/proj/a/file1.txt"
+git -C "$DST" add -A && git -C "$DST" commit -qm "clip: change file1"
+git -C "$DST" checkout master -q
+echo "== Conflict preview =="
+"$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --dry-run --merge | sed -n '1,120p'
+
+# Scenario 4: Prune source
+"$(pwd)/git-cut" proj/a --repo "$SRC" --out-dir "$CLIPS" --name prune-test --prune-source
+if git -C "$SRC" ls-files | grep -q '^proj/a/'; then
+  echo "ERROR: prune failed: proj/a still present" >&2
+  exit 1
+fi
+echo "== Source log after prune =="
+git -C "$SRC" log -1 --pretty=%B | sed -n '1,4p'
+
+echo "E2E OK: $TMP_ROOT"
