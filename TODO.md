@@ -11,17 +11,16 @@
 - [done] git-clipboard: gives status of the clipboard state
 - [done] Single-letter CLI flags alternatives, for less typing
 - [done] git-paste: `--list-refs` to show heads available in the bundle and exit
+- [done] Dry-run enhancements v2: size estimates and changed file sampling
+- [done] Docs: document obvious mode and clipboard default with an example
 
 BackLog
 
-- [done] Dry-run enhancements v2: size estimates and changed file sampling
-- Tests: unitized test for obvious mode prompt path (added in e2e; consider splitting into shell functions)
-- Docs: document obvious mode and clipboard default with an example
+- Packaging: 1) pipx wrapper, 2) Homebrew tap or simple install script; 
 - Submodules/LFS handling options
-- Packaging: Homebrew tap or simple install script; optional pipx wrapper
 - [later] Windows support audit (paths and quoting) and docs
 - [later] Paste: optionally record source metadata as git-notes (deferred; trailers cover the need for now)
 
 Next up (picked)
 
-- Dry-run enhancements v2: size estimates and changed file sampling
+- Tests: obvious mode prompt covered in e2e; optional unit test or refactor e2e into shell functions
