@@ -13,14 +13,14 @@
 - [done] git-paste: `--list-refs` to show heads available in the bundle and exit
 - [done] Dry-run enhancements v2: size estimates and changed file sampling
 - [done] Docs: document obvious mode and clipboard default with an example
+- [done] Tests: obvious mode prompt covered in e2e; optional unit test or refactor e2e into shell functions
 
 BackLog
 
-- Packaging: 1) pipx wrapper, 2) Homebrew tap or simple install script; 
 - Submodules/LFS handling options
 - [later] Windows support audit (paths and quoting) and docs
 - [later] Paste: optionally record source metadata as git-notes (deferred; trailers cover the need for now)
 
 Next up (picked)
 
-- Tests: obvious mode prompt covered in e2e; optional unit test or refactor e2e into shell functions
+- Packaging: 1) pipx wrapper, 2) Homebrew tap or simple install script; 

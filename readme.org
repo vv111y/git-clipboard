@@ -1,9 +1,0 @@
-
-git-clipboard pesents git-cut and git-paste tools; that make it easy to manage git histories by cutting and pasting git histories from one repo to the other. Provides sensible defaults, and switches for different scenarios.
-Making it easy to move files and folders along with their associated histories.
-This was motivated by my need to version my config files, but also that I need to experiment with different ways to manage them until I settle on a solution. In trying new ways, it is not enough to just reorganize files.
-The heavy lifting is done by `git-filter-repo`; these are just convenience wrappers that encapsulate all the best and likely ways to use it with minimal effort.
-
-
-
-

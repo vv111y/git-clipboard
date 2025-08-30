@@ -1,20 +1,7 @@
 #!/usr/bin/env python3
 """
-git-cut: Create a self-contained Git bundle of selected paths with full history
-
-High-level flow:
-- Clone the source repo into a temporary directory
-- Use git filter-repo to keep only the requested paths (optionally re-root to a subdirectory)
-- Create a .bundle file with all refs preserving history
-- Emit a clip metadata JSON alongside the bundle for easier paste
-
-Requirements:
-- git must be installed
-- git-filter-repo must be installed (either as `git filter-repo` or `git-filter-repo`)
-
-This tool does NOT modify your source repo.
+Package entry for git-cut
 """
-
 from __future__ import annotations
 
 import argparse
@@ -52,13 +39,11 @@ def detect_filter_repo_cmd() -> list[str]:
 
     Tries `git filter-repo` first (plugin style), then `git-filter-repo`.
     """
-    # Try plugin invocation first
     try:
         run(["git", "filter-repo", "--help"], capture_output=True)
         return ["git", "filter-repo"]
     except Exception:
         pass
-    # Try standalone script name
     if which("git-filter-repo"):
         try:
             run(["git-filter-repo", "--help"], capture_output=True)
@@ -111,7 +96,6 @@ def gather_repo_remotes(repo_dir: Path) -> dict[str, str]:
 
 
 def detect_default_branch(repo_dir: Path) -> str | None:
-    # Try HEAD symbolic ref first
     try:
         out = run(["git", "symbolic-ref", "-q", "--short", "HEAD"], cwd=repo_dir, capture_output=True)
         ref = out.stdout.strip()
@@ -119,7 +103,6 @@ def detect_default_branch(repo_dir: Path) -> str | None:
             return ref
     except Exception:
         pass
-    # Fallback to current branch name resolution
     try:
         out = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_dir, capture_output=True)
         ref = out.stdout.strip()
@@ -130,7 +113,7 @@ def detect_default_branch(repo_dir: Path) -> str | None:
     return None
 
 
-def main():
+def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description="Create a Git bundle of selected paths with full history.")
     parser.add_argument("paths", nargs="+", help="File or directory paths to include (relative to repo root)")
     parser.add_argument("-r", "--repo", default=".", help="Path to the source git repository (default: .)")
@@ -143,7 +126,7 @@ def main():
     parser.add_argument("-p", "--prune-source", action="store_true", help="After a successful cut, delete the specified paths from the source repo and commit the removal")
     parser.add_argument("-A", "--require-ack", default=None, help="Path to an ack file produced by git-paste --ack; if provided, pruning only proceeds if ack exists")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     git_ver = require_git()
     filter_repo_cmd = detect_filter_repo_cmd()
@@ -153,9 +136,6 @@ def main():
         print(f"Error: {src_repo} is not a git repository", file=sys.stderr)
         sys.exit(1)
 
-    # Verify paths exist in the repo
-    # We won't strictly require them to exist in the working tree (could be historical),
-    # but warn if none exist currently.
     present = [p for p in args.paths if (src_repo / p).exists()]
     if not present:
         print("Warning: none of the specified paths exist in the current working tree. Proceeding anyway…", file=sys.stderr)
@@ -167,9 +147,7 @@ def main():
         sys.exit(1)
 
     if args.dry_run:
-        # Summarize what would be kept
         try:
-            # Count commits touching the paths
             rev_count = run(["git", "rev-list", "--all", "--count", "--", *args.paths], cwd=src_repo, capture_output=True).stdout.strip()
         except Exception:
             rev_count = "unknown"
@@ -192,15 +170,13 @@ def main():
             "note": "No files created due to --dry-run",
         }
         print(json.dumps(plan, indent=2))
-        return
+        return 0
 
     temp_dir = Path(tempfile.mkdtemp(prefix="git-cut-"))
     temp_repo = temp_dir / "repo"
     try:
-        # Clone without hardlinks to keep isolation
         run(["git", "clone", "--no-local", "--no-hardlinks", str(src_repo), str(temp_repo)])
 
-        # Filter to paths
         filter_cmd = list(filter_repo_cmd)
         filter_cmd += ["--force"]
         for p in args.paths:
@@ -210,16 +186,13 @@ def main():
 
         run(filter_cmd, cwd=temp_repo)
 
-        # Determine default branch after filtering
         default_branch = detect_default_branch(temp_repo)
 
-        # Create bundle with all refs
         out_dir.mkdir(parents=True, exist_ok=True)
         if bundle_path.exists() and args.force:
             bundle_path.unlink()
         run(["git", "bundle", "create", str(bundle_path), "--all"], cwd=temp_repo)
 
-        # Write metadata
         meta = {
             "version": 1,
             "created_at": _dt.datetime.now().isoformat(),
@@ -240,7 +213,6 @@ def main():
         print(str(bundle_path))
         print(str(meta_path))
 
-        # Update global clipboard pointer (~/.git-clipboard/last)
         try:
             home_clip = Path.home() / ".git-clipboard"
             home_clip.mkdir(parents=True, exist_ok=True)
@@ -249,22 +221,17 @@ def main():
         except Exception as e:
             print(f"Warning: could not update global clipboard pointer: {e}", file=sys.stderr)
 
-        # Optional prune step on the source repo
         if args.prune_source:
-            # Preconditions: clean working tree, not in the temp repo
             status = run(["git", "status", "--porcelain"], cwd=src_repo, capture_output=True).stdout.strip()
             if status:
                 print("Error: working tree not clean; aborting prune.", file=sys.stderr)
                 sys.exit(1)
-            # Optional ack
             if args.require_ack:
                 ack_path = Path(args.require_ack)
                 if not ack_path.exists():
                     print(f"Error: ack file not found: {ack_path}", file=sys.stderr)
                     sys.exit(1)
-            # Record the cut HEAD for traceability
             head = run(["git", "rev-parse", "--short", "HEAD"], cwd=src_repo, capture_output=True).stdout.strip()
-            # Remove the paths and commit
             run(["git", "rm", "-r", "--ignore-unmatch", *args.paths], cwd=src_repo)
             msg = f"Move to new repo via clip {bundle_path.name} (cut from {head})"
             run(["git", "commit", "-m", msg], cwd=src_repo)
@@ -274,6 +241,8 @@ def main():
         else:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

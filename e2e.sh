@@ -21,6 +21,41 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Resolve executables: prefer local venv scripts, then PATH; fallback to `python -m`.
+PY_BIN="$(
+  if [ -x ".venv/bin/python" ]; then echo ".venv/bin/python"; elif command -v python3 >/dev/null 2>&1; then echo "python3"; else echo "python"; fi
+)"
+
+git_cut() {
+  if [ -x ".venv/bin/git-cut" ]; then
+    .venv/bin/git-cut "$@"
+  elif command -v git-cut >/dev/null 2>&1; then
+    git-cut "$@"
+  else
+  PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}" "$PY_BIN" -m git_clipboard.cut "$@"
+  fi
+}
+
+git_paste() {
+  if [ -x ".venv/bin/git-paste" ]; then
+    .venv/bin/git-paste "$@"
+  elif command -v git-paste >/dev/null 2>&1; then
+    git-paste "$@"
+  else
+  PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}" "$PY_BIN" -m git_clipboard.paste "$@"
+  fi
+}
+
+git_clipboard_cmd() {
+  if [ -x ".venv/bin/git-clipboard" ]; then
+    .venv/bin/git-clipboard "$@"
+  elif command -v git-clipboard >/dev/null 2>&1; then
+    git-clipboard "$@"
+  else
+  PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}" "$PY_BIN" -m git_clipboard.clipboard "$@"
+  fi
+}
+
 setup_fixture() {
   mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4" "$DST5" "$DST6" "$DST7"
 
@@ -37,7 +72,7 @@ setup_fixture() {
 
   # Cut only proj/a into a clip under subdir 'imported'
   CLIP_NAME="clip-test"
-  "$(pwd)/git-cut" proj/a --repo "$SRC" --to-subdir imported --out-dir "$CLIPS" --name "$CLIP_NAME"
+  git_cut proj/a --repo "$SRC" --to-subdir imported --out-dir "$CLIPS" --name "$CLIP_NAME"
 
   # Verify outputs exist
   [ -s "$CLIPS/$CLIP_NAME.bundle" ]
@@ -47,8 +82,8 @@ setup_fixture() {
 scenario_clipboard_default() {
   # Scenario 0: Paste using clipboard default (no bundle arg)
   git -C "$DST3" init -q
-  "$(pwd)/git-paste" --repo "$DST3" --dry-run | sed -n '1,80p'
-  "$(pwd)/git-paste" --repo "$DST3" | sed -n '1,40p'
+  git_paste --repo "$DST3" --dry-run | sed -n '1,80p'
+  git_paste --repo "$DST3" | sed -n '1,40p'
   if ! git -C "$DST3" branch --list | grep -q "clip/$CLIP_NAME"; then
     echo "ERROR: expected imported branch clip/$CLIP_NAME not found in DST3" >&2
     exit 1
@@ -59,11 +94,11 @@ scenario_dry_run_and_merge() {
   # Dry-run paste into target
   git -C "$DST" init -q
   BR_DST=$(git -C "$DST" symbolic-ref -q --short HEAD || echo master)
-  "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --dry-run --merge | sed -n '1,120p'
+  git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --dry-run --merge | sed -n '1,120p'
 
   # Actual paste: import branch then (no commits, so create initial commit and merge)
   git -C "$DST" commit --allow-empty -qm "chore: initial"
-  "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --merge --allow-unrelated-histories --message "Import clip"
+  git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --merge --allow-unrelated-histories --message "Import clip"
 
   echo "== Log after merge =="
   git -C "$DST" log --graph --oneline --decorate -n 10
@@ -77,7 +112,7 @@ scenario_squash_import() {
   git -C "$DST2" init -q
   BR_DST2=$(git -C "$DST2" symbolic-ref -q --short HEAD || echo master)
   git -C "$DST2" commit --allow-empty -qm "chore: initial"
-  "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST2" --merge --squash --allow-unrelated-histories --message "Squash Import"
+  git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST2" --merge --squash --allow-unrelated-histories --message "Squash Import"
   echo "== Squash Log =="
   git -C "$DST2" log --oneline -n 3 | sed -n '1,3p'
   echo "== Squash Tree =="
@@ -94,12 +129,12 @@ scenario_conflict_preview() {
   git -C "$DST" add -A && git -C "$DST" commit -qm "clip: change file1"
   git -C "$DST" checkout "$BR_DST" -q
   echo "== Conflict preview =="
-  "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --dry-run --merge | sed -n '1,120p'
+  git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST" --dry-run --merge | sed -n '1,120p'
 }
 
 scenario_prune_source() {
   # Scenario 4: Prune source
-  "$(pwd)/git-cut" proj/a --repo "$SRC" --out-dir "$CLIPS" --name prune-test --prune-source
+  git_cut proj/a --repo "$SRC" --out-dir "$CLIPS" --name prune-test --prune-source
   if git -C "$SRC" ls-files | grep -q '^proj/a/'; then
     echo "ERROR: prune failed: proj/a still present" >&2
     exit 1
@@ -114,12 +149,12 @@ scenario_obvious_mode_prompt() {
   BR_DST4=$(git -C "$DST4" symbolic-ref -q --short HEAD || echo master)
   git -C "$DST4" commit --allow-empty -qm "chore: initial"
   # First, seed the repo with a real merge so histories are related
-  "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST4" --merge --allow-unrelated-histories --message "seed import" | sed -n '1,120p'
+  git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST4" --merge --allow-unrelated-histories --message "seed import" | sed -n '1,120p'
   # Add a trivial commit on master to ensure a non-trivial but clean merge
   echo note >> "$DST4/README.txt" || true
   git -C "$DST4" add -A && git -C "$DST4" commit -qm "chore: note"
   # Now run obvious mode (no flags) and auto-confirm; use printf to avoid SIGPIPE from yes
-  printf 'y\n' | "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST4" | sed -n '1,120p'
+  printf 'y\n' | git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST4" | sed -n '1,120p'
   echo "== Obvious Mode Log =="
   git -C "$DST4" log --graph --oneline --decorate -n 8 | sed -n '1,120p'
 }
@@ -129,7 +164,7 @@ scenario_merge_with_trailers() {
   git -C "$DST5" init -q
   BR_DST5=$(git -C "$DST5" symbolic-ref -q --short HEAD || echo master)
   git -C "$DST5" commit --allow-empty -qm "chore: initial"
-  "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST5" --merge --allow-unrelated-histories --message "Import clip" --trailers | sed -n '1,120p'
+  git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST5" --merge --allow-unrelated-histories --message "Import clip" --trailers | sed -n '1,120p'
   LAST_MSG=$(git -C "$DST5" log -1 --pretty=%B)
   echo "== Merge with trailers commit message =="
   echo "$LAST_MSG" | sed -n '1,80p'
@@ -143,7 +178,7 @@ scenario_squash_with_trailers() {
   git -C "$DST6" init -q
   BR_DST6=$(git -C "$DST6" symbolic-ref -q --short HEAD || echo master) || true
   git -C "$DST6" commit --allow-empty -qm "chore: initial"
-  "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST6" --merge --squash --allow-unrelated-histories --message "Squash Import" --trailers | sed -n '1,120p'
+  git_paste "$CLIPS/$CLIP_NAME.bundle" --repo "$DST6" --merge --squash --allow-unrelated-histories --message "Squash Import" --trailers | sed -n '1,120p'
   LAST_MSG2=$(git -C "$DST6" log -1 --pretty=%B)
   echo "== Squash with trailers commit message =="
   echo "$LAST_MSG2" | sed -n '1,80p'
@@ -155,7 +190,7 @@ scenario_squash_with_trailers() {
 scenario_list_refs() {
   # Scenario 8: List refs in bundle as JSON
   echo "== List refs =="
-  LIST_JSON=$("$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --list-refs)
+  LIST_JSON=$(git_paste "$CLIPS/$CLIP_NAME.bundle" --list-refs)
   echo "$LIST_JSON" | sed -n '1,60p'
   echo "$LIST_JSON" | grep -q '"action": "list-refs"' || { echo "ERROR: missing action in list-refs" >&2; exit 1; }
   echo "$LIST_JSON" | grep -q '"refs"' || { echo "ERROR: missing refs in list-refs" >&2; exit 1; }
