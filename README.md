@@ -44,6 +44,7 @@ git-cut [PATH ...] [--repo REPO] [--to-subdir DIR] [--out-dir DIR] [--name NAME]
 
 - NAME.bundle: a git bundle with all refs from the filtered repo
 - NAME.json: metadata capturing paths, subdir, source remotes, and default branch
+- The last clip pointer is also written to ~/.git-clipboard/last for easy pasting without specifying a path.
 
 ## git-paste
 
@@ -52,7 +53,7 @@ Import a previously created bundle into a target repository. By default it creat
 Usage
 
 ```bash
-git-paste BUNDLE [--meta META.json] [--repo REPO] [--as-branch NAME] [--branch BRANCH] [--merge|--squash|--rebase] [--no-ff] [--message MSG] [--dry-run] [--allow-unrelated-histories] [--prompt-merge]
+git-paste [BUNDLE] [--meta META.json] [--repo REPO] [--as-branch NAME] [--branch BRANCH] [--merge|--squash|--rebase] [--no-ff] [--message MSG] [--dry-run] [--allow-unrelated-histories] [--prompt-merge]
 ```
 
 ### Default behavior
@@ -60,6 +61,11 @@ git-paste BUNDLE [--meta META.json] [--repo REPO] [--as-branch NAME] [--branch B
 - Creates a branch `clip/<bundle-base-name>` from the bundle's first head
 - If --merge/--squash/--rebase is given, merges into the current branch (or --branch)
 - Cleans up a temporary remote used for fetching from the bundle
+
+### Clipboard default and obvious mode
+
+- If BUNDLE is omitted, git-paste looks up the last clip pointer at `~/.git-clipboard/last` written by git-cut, and uses that bundle.
+- If you pass no merge flags, git-paste runs a quick merge preview and, if clean, prompts whether to auto-merge the imported branch into the current (or --branch) target. If conflicts are likely or unknown, it won’t auto-merge.
 
 ### Notes for dry-run
 

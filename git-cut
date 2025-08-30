@@ -240,6 +240,15 @@ def main():
         print(str(bundle_path))
         print(str(meta_path))
 
+        # Update global clipboard pointer (~/.git-clipboard/last)
+        try:
+            home_clip = Path.home() / ".git-clipboard"
+            home_clip.mkdir(parents=True, exist_ok=True)
+            last = home_clip / "last"
+            last.write_text(json.dumps({"bundle": str(bundle_path), "meta": str(meta_path)}, indent=2))
+        except Exception as e:
+            print(f"Warning: could not update global clipboard pointer: {e}", file=sys.stderr)
+
         # Optional prune step on the source repo
         if args.prune_source:
             # Preconditions: clean working tree, not in the temp repo

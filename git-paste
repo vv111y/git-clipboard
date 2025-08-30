@@ -41,7 +41,7 @@ def is_git_repo(path: Path) -> bool:
 
 def parse_args():
     p = argparse.ArgumentParser(description="Apply a git-clipboard bundle into a target repo")
-    p.add_argument("bundle", help="Path to the .bundle file")
+    p.add_argument("bundle", nargs="?", help="Path to the .bundle file (optional: defaults to last clip)")
     p.add_argument("--meta", help="Path to the metadata JSON produced by git-cut (optional)")
     p.add_argument("--repo", default=".", help="Target repository (default: .)")
     p.add_argument("--branch", help="Branch to merge into (default: current branch)")
@@ -103,7 +103,23 @@ def main():
         print("Error: git is required", file=sys.stderr)
         sys.exit(1)
 
-    bundle = Path(args.bundle).resolve()
+    # Resolve bundle path: explicit or from global clipboard pointer
+    if args.bundle:
+        bundle = Path(args.bundle).resolve()
+    else:
+        last_path = Path.home() / ".git-clipboard" / "last"
+        if not last_path.exists():
+            print("Error: no bundle specified and no last clip pointer found.", file=sys.stderr)
+            sys.exit(1)
+        try:
+            last = json.loads(last_path.read_text())
+            bundle = Path(last.get("bundle", "")).resolve()
+            if not bundle.exists():
+                print(f"Error: last bundle not found: {bundle}", file=sys.stderr)
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error reading last clip pointer: {e}", file=sys.stderr)
+            sys.exit(1)
     if not bundle.exists():
         print(f"Error: bundle not found: {bundle}", file=sys.stderr)
         sys.exit(1)
@@ -186,12 +202,15 @@ def main():
         if not args.dry_run:
             print(f"Imported branch: {as_branch}")
 
-        # Merge if requested
-        if args.merge or args.squash or args.rebase or args.dry_run:
+        # Obvious mode: if no flags at all, preview and prompt to merge if clean
+        obvious_mode = (not args.merge and not args.squash and not args.rebase and not args.dry_run and not args.prompt_merge)
+
+        # Merge if requested or in obvious mode
+        if args.merge or args.squash or args.rebase or args.dry_run or obvious_mode:
             repo_has_commits = has_commits(work_repo)
             target_branch = args.branch or (current_branch(work_repo) if repo_has_commits else None)
             if not repo_has_commits:
-                if args.dry_run:
+                if args.dry_run or obvious_mode:
                     print(json.dumps({
                         "action": "merge-preview",
                         "target": None,
@@ -201,22 +220,17 @@ def main():
                     }, indent=2))
                 else:
                     print("Target repo has no commits; skipping merge. Imported branch created.")
-                # Nothing else to do in this section
                 return
             if target_branch == "HEAD":
                 print("Error: cannot merge onto detached HEAD. Specify --branch.", file=sys.stderr)
                 sys.exit(1)
-            # Ensure target branch exists
             run(["git", "rev-parse", "--verify", target_branch], cwd=work_repo)
 
-            # Ensure we are on the target branch
             if not args.dry_run:
                 run(["git", "checkout", target_branch], cwd=work_repo)
 
-            # Optional rebase of imported branch onto target
             if args.rebase:
-                # This form checks out `as_branch`, rebases it onto target_branch
-                if args.dry_run:
+                if args.dry_run or obvious_mode:
                     print(json.dumps({
                         "action": "rebase",
                         "branch": as_branch,
@@ -224,7 +238,6 @@ def main():
                     }, indent=2))
                 else:
                     run(["git", "rebase", target_branch, as_branch], cwd=work_repo)
-                    # Return to target branch for the merge step
                     run(["git", "checkout", target_branch], cwd=work_repo)
 
             merge_cmd = ["git", "merge"]
@@ -238,8 +251,7 @@ def main():
                 merge_cmd += ["-m", args.message]
             merge_cmd.append(as_branch)
 
-            if args.dry_run:
-                # Use merge-tree to detect conflicts without touching the working tree
+            if args.dry_run or obvious_mode:
                 try:
                     base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
                 except Exception:
@@ -259,8 +271,15 @@ def main():
                     "auto_allow_unrelated_histories": (not base),
                     "note": None if base else "Could not determine merge-base; conflict status unknown"
                 }, indent=2))
+                if obvious_mode and conflicts is False:
+                    ans = input("Auto-merge now? [y/N]: ").strip().lower()
+                    if ans not in ("y", "yes"):
+                        print("Merge skipped by user.")
+                        return
+                elif obvious_mode:
+                    print("Conflicts likely or unknown; not auto-merging.")
+                    return
             elif args.prompt_merge:
-                # Non-dry-run preview + prompt before actually merging
                 try:
                     base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
                 except Exception:
@@ -288,7 +307,6 @@ def main():
                     print("Conflicts likely or unknown; not auto-merging.")
                     return
             else:
-                # Auto enable --allow-unrelated-histories if there is no merge-base
                 try:
                     base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
                 except Exception:
@@ -297,11 +315,9 @@ def main():
                     merge_cmd.insert(2, "--allow-unrelated-histories")
                 run(merge_cmd, cwd=work_repo)
 
-            if args.squash:
-                # Finalize squash merge with a commit
+            if args.squash and not (args.dry_run or obvious_mode):
                 msg = args.message or f"Squash import from {as_branch}"
-                if not args.dry_run:
-                    run(["git", "commit", "-m", msg], cwd=work_repo)
+                run(["git", "commit", "-m", msg], cwd=work_repo)
 
             if not args.dry_run:
                 print(f"Merged {as_branch} into {target_branch}")
