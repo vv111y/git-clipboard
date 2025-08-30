@@ -10,13 +10,14 @@ SRC="$TMP_ROOT/src"
 DST="$TMP_ROOT/dst"
 CLIPS="$TMP_ROOT/clips"
 DST2="$TMP_ROOT/dst2"
+DST3="$TMP_ROOT/dst3"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
 
-mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2"
+mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3"
 
 git -C "$SRC" init -q
 mkdir -p "$SRC/proj/a" "$SRC/proj/b"
@@ -36,6 +37,15 @@ CLIP_NAME="clip-test"
 # Verify outputs exist
 [ -s "$CLIPS/$CLIP_NAME.bundle" ]
 [ -s "$CLIPS/$CLIP_NAME.json" ]
+
+# Scenario 0: Paste using clipboard default (no bundle arg)
+git -C "$DST3" init -q
+"$(pwd)/git-paste" --repo "$DST3" --dry-run | sed -n '1,80p'
+"$(pwd)/git-paste" --repo "$DST3" | sed -n '1,40p'
+if ! git -C "$DST3" branch --list | grep -q "clip/$CLIP_NAME"; then
+  echo "ERROR: expected imported branch clip/$CLIP_NAME not found in DST3" >&2
+  exit 1
+fi
 
 # Dry-run paste into target
 git -C "$DST" init -q
