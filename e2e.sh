@@ -11,13 +11,14 @@ DST="$TMP_ROOT/dst"
 CLIPS="$TMP_ROOT/clips"
 DST2="$TMP_ROOT/dst2"
 DST3="$TMP_ROOT/dst3"
+DST4="$TMP_ROOT/dst4"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
 
-mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3"
+mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4"
 
 git -C "$SRC" init -q
 mkdir -p "$SRC/proj/a" "$SRC/proj/b"
@@ -89,5 +90,18 @@ if git -C "$SRC" ls-files | grep -q '^proj/a/'; then
 fi
 echo "== Source log after prune =="
 git -C "$SRC" log -1 --pretty=%B | sed -n '1,4p'
+
+# Scenario 5: Obvious mode auto-merge prompt (clean merge path)
+git -C "$DST4" init -q
+git -C "$DST4" commit --allow-empty -qm "chore: initial"
+# First, seed the repo with a real merge so histories are related
+"$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST4" --merge --allow-unrelated-histories --message "seed import" | sed -n '1,120p'
+# Add a trivial commit on master to ensure a non-trivial but clean merge
+echo note >> "$DST4/README.txt" || true
+git -C "$DST4" add -A && git -C "$DST4" commit -qm "chore: note"
+# Now run obvious mode (no flags) and auto-confirm; use printf to avoid SIGPIPE from yes
+printf 'y\n' | "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST4" | sed -n '1,120p'
+echo "== Obvious Mode Log =="
+git -C "$DST4" log --graph --oneline --decorate -n 8 | sed -n '1,120p'
 
 echo "E2E OK: $TMP_ROOT"

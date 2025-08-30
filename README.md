@@ -33,12 +33,12 @@ git-cut [PATH ...] [--repo REPO] [--to-subdir DIR] [--out-dir DIR] [--name NAME]
 
 ### Key options
 
-- --repo: path to the source repository (default: current dir)
-- --to-subdir: re-root the content into a subdirectory inside the clip
-- --out-dir: where to write the .bundle and .json (default: ./.git-clipboard)
-- --name: base filename for the outputs (default: clip-YYYYmmdd-HHMMSS)
-- --force: overwrite existing outputs
-- --dry-run: print a JSON plan without creating output files
+- -r/--repo: path to the source repository (default: current dir)
+- -t/--to-subdir: re-root the content into a subdirectory inside the clip
+- -o/--out-dir: where to write the .bundle and .json (default: ./.git-clipboard)
+- -n/--name: base filename for the outputs (default: clip-YYYYmmdd-HHMMSS)
+- -f/--force: overwrite existing outputs
+- -d/--dry-run: print a JSON plan without creating output files
 
 ### Outputs
 
@@ -53,7 +53,7 @@ Import a previously created bundle into a target repository. By default it creat
 Usage
 
 ```bash
-git-paste [BUNDLE] [--meta META.json] [--repo REPO] [--as-branch NAME] [--branch BRANCH] [--merge|--squash|--rebase] [--no-ff] [--message MSG] [--dry-run] [--allow-unrelated-histories] [--prompt-merge]
+git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [-b BRANCH] [--merge|-M|--squash|-s|--rebase|-R] [--no-ff|-F] [--message|-j MSG] [--dry-run|-d] [--allow-unrelated-histories|-U] [--prompt-merge|-p]
 ```
 
 ### Default behavior
@@ -66,6 +66,16 @@ git-paste [BUNDLE] [--meta META.json] [--repo REPO] [--as-branch NAME] [--branch
 
 - If BUNDLE is omitted, git-paste looks up the last clip pointer at `~/.git-clipboard/last` written by git-cut, and uses that bundle.
 - If you pass no merge flags, git-paste runs a quick merge preview and, if clean, prompts whether to auto-merge the imported branch into the current (or --branch) target. If conflicts are likely or unknown, it won’t auto-merge.
+
+Example (clipboard + obvious mode):
+
+```bash
+# In source repo
+git-cut path/to/subtree --out-dir ../clips --to-subdir imported
+
+# In target repo, just paste with no args. If clean, confirm to auto-merge.
+git-paste
+```
 
 ### Notes for dry-run
 
@@ -93,6 +103,28 @@ git-cut dotfiles/.config nvim/ --to-subdir configs --out-dir ../clips
 git-paste ../clips/clip-20250101-120000.bundle --dry-run --merge
 # If clean, perform the merge (often with unrelated histories allowed):
 git-paste ../clips/clip-20250101-120000.bundle --merge --allow-unrelated-histories --message "Import configs"
+```
+
+## Try it
+
+Quick smoke test and demo:
+
+```bash
+# Make the scripts executable (once)
+chmod +x git-cut git-paste
+
+# Run the end-to-end test; it prints JSON previews and ends with "E2E OK"
+bash ./e2e.sh
+```
+
+Minimal clipboard flow:
+
+```bash
+# In a source repo
+git-cut some/path --to-subdir imported
+
+# In a target repo
+git-paste   # uses the last clip; if clean, confirm to auto-merge
 ```
 
 ## Tests

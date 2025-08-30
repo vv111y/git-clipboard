@@ -42,19 +42,19 @@ def is_git_repo(path: Path) -> bool:
 def parse_args():
     p = argparse.ArgumentParser(description="Apply a git-clipboard bundle into a target repo")
     p.add_argument("bundle", nargs="?", help="Path to the .bundle file (optional: defaults to last clip)")
-    p.add_argument("--meta", help="Path to the metadata JSON produced by git-cut (optional)")
-    p.add_argument("--repo", default=".", help="Target repository (default: .)")
-    p.add_argument("--branch", help="Branch to merge into (default: current branch)")
-    p.add_argument("--as-branch", dest="as_branch", help="Name of branch to create from bundle (default: clip/<bundle-name>)")
-    p.add_argument("--merge", action="store_true", help="Merge the imported branch into --branch/current")
-    p.add_argument("--squash", action="store_true", help="Use a squash merge")
-    p.add_argument("--rebase", action="store_true", help="Rebase the imported branch onto --branch/current before merging")
-    p.add_argument("--remote-name", default=None, help="Optional remote name to add for the bundle (will be removed after)")
-    p.add_argument("--no-ff", action="store_true", help="Disable fast-forward during merge")
-    p.add_argument("--message", default=None, help="Custom merge commit message")
-    p.add_argument("--dry-run", action="store_true", help="Preview import and potential merge/conflicts without changing the repo")
-    p.add_argument("--allow-unrelated-histories", action="store_true", help="Allow merging unrelated histories (recommended for imported clips)")
-    p.add_argument("--prompt-merge", action="store_true", help="After creating import branch, prompt to auto-merge if preview is clean")
+    p.add_argument("-m", "--meta", help="Path to the metadata JSON produced by git-cut (optional)")
+    p.add_argument("-r", "--repo", default=".", help="Target repository (default: .)")
+    p.add_argument("-b", "--branch", help="Branch to merge into (default: current branch)")
+    p.add_argument("-a", "--as-branch", dest="as_branch", help="Name of branch to create from bundle (default: clip/<bundle-name>)")
+    p.add_argument("-M", "--merge", action="store_true", help="Merge the imported branch into --branch/current")
+    p.add_argument("-s", "--squash", action="store_true", help="Use a squash merge")
+    p.add_argument("-R", "--rebase", action="store_true", help="Rebase the imported branch onto --branch/current before merging")
+    p.add_argument("-u", "--remote-name", default=None, help="Optional remote name to add for the bundle (will be removed after)")
+    p.add_argument("-F", "--no-ff", action="store_true", help="Disable fast-forward during merge")
+    p.add_argument("-j", "--message", default=None, help="Custom merge commit message")
+    p.add_argument("-d", "--dry-run", action="store_true", help="Preview import and potential merge/conflicts without changing the repo")
+    p.add_argument("-U", "--allow-unrelated-histories", action="store_true", help="Allow merging unrelated histories (recommended for imported clips)")
+    p.add_argument("-p", "--prompt-merge", action="store_true", help="After creating import branch, prompt to auto-merge if preview is clean")
     return p.parse_args()
 
 
@@ -276,6 +276,15 @@ def main():
                     if ans not in ("y", "yes"):
                         print("Merge skipped by user.")
                         return
+                    # Perform the actual merge now that user confirmed
+                    # If merge-base exists, histories are related; otherwise we wouldn't be here with conflicts=False
+                    run(merge_cmd, cwd=work_repo)
+                    if args.squash:
+                        msg = args.message or f"Squash import from {as_branch}"
+                        run(["git", "commit", "-m", msg], cwd=work_repo)
+                    if not args.dry_run:
+                        print(f"Merged {as_branch} into {target_branch}")
+                    return
                 elif obvious_mode:
                     print("Conflicts likely or unknown; not auto-merging.")
                     return
