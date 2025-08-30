@@ -1079,7 +1079,785 @@ yes
 
 _**Assistant**_
 
+I'll review the current CHANGELOG to format the new release entry consistently, then update it with v0.2.0 details. 
+```
 
+```
+
+```
+
+```
+Confirming the release bump and provenance polish are done; I added trailers with Clip-Ref/Clip-Head, updated docs/tests, and tagged v0.2.0 locally.
+
+## Actions taken
+
+- Code
+  - `git-paste`: trailers now include Clip-Ref and Clip-Head; preserved default merge messages and append trailers via amend when needed.
+- Docs
+  - `README.md`: documented `--trailers` with example; included Clip-Ref and Clip-Head.
+  - `CHANGELOG.md`: added v0.2.0 entry (Features/Tests/Docs/Notes).
+- Tests
+  - `e2e.sh`: added assertions for Clip-Ref and Clip-Head in both merge and squash scenarios.
+- Release
+  - Committed changes and created an annotated tag v0.2.0 (points to the new commit).
+
+## Status
+
+- Tests: PASS (e2e ends with “E2E OK”)
+- Tag: v0.2.0 exists locally, annotated and pointing to the release commit.
+- No Python lint/type errors on `git-paste`.
+
+## Files changed
+
+- `git-paste`: trailers improvements and head SHA capture
+- `README.md`: trailers section updated
+- `CHANGELOG.md`: v0.2.0 entry
+- `e2e.sh`: new trailer checks
+- `tasks.json`: added by previous task runner (committed)
+
+## Optional next step
+
+- Push tag when ready:
+  - git push origin v0.2.0
+  - git push origin main
+
+If you want me to push the tag now, say the word.
+
+---
+
+_**User**_
+
+yes
+
+---
+
+_**Assistant**_
+
+Pushing the new release now.
+
+- Pushed main: e6bfe53 -> 339e509
+- Pushed tag: v0.2.0
+
+What’s included in v0.2.0
+- git-paste: --ref, --trailers with Clip-Ref/Clip-Head, preserves default merge message when no --message
+- Short flags and status helper
+- README and CHANGELOG updated
+- e2e extended; all green
+
+Optional next step
+- Draft GitHub release notes from CHANGELOG v0.2.0 and link to the tag.
+
+---
+
+_**User**_
+
+yes, remember to put notes in markdown block
+
+---
+
+_**Assistant**_
+
+Task: Prepare release notes for v0.2.0 and present them in a markdown block.
+Plan:
+- Summarize changes since v0.1.0.
+- Include highlights, features, tests, docs, and upgrade notes in a single markdown block.
+
+```markdown
+# git-clipboard v0.2.0 (2025-08-30)
+
+Ref selection on paste, provenance trailers, short flags, and a clipboard status helper.
+
+## Highlights
+- Paste a specific ref from a clip with `--ref`.
+- Add provenance to merge/squash commits with `--trailers` (includes Clip-Ref and Clip-Head).
+- Faster UX via short flags across cut/paste.
+- New `git-clipboard` status utility prints last clip info.
+
+## Features
+- git-paste
+  - `--ref` to choose a bundle ref (e.g., `main` or `refs/heads/main`).
+  - `--trailers` appends commit trailers: Clip-Bundle, Clip-Source, Clip-Paths, Clip-Subdir, Clip-Created-At, Clip-Ref, Clip-Head.
+  - Preserves default merge message when no `--message`; appends trailers via amend.
+  - Dry-run/preview JSON now includes `trailers: true|false`.
+
+- git-cut / git-paste
+  - Short flags added for common options (e.g., `-r`, `-d`, `-m`, `-p`, `-T`).
+
+- git-clipboard
+  - Prints the last clipboard pointer and key metadata.
+
+## Tests
+- e2e extended with:
+  - Clipboard default and obvious-mode auto-merge prompt.
+  - Merge and Squash with `--trailers`, asserting Clip-* trailers (including Clip-Ref/Clip-Head).
+
+## Docs
+- README updated: `--ref` selection and a Trailers section with examples.
+
+## Notes
+- Dry-run remains non-mutating; previews show `trailers` intent.
+- Requires git and git-filter-repo.
+
+## Upgrade
+- Update scripts from main.
+- Tag: `v0.2.0`
+```
+
+---
+
+_**User**_
+
+alright, update todo and pick next
+
+---
+
+_**Assistant**_
+
+
+```
+
+```
+Here’s what I’ll do next: update the TODO to mark what we just shipped and choose a small, high-impact next task.
+
+Checklist
+- Mark done: paste ref selection and trailers.
+- Defer notes (git-notes) since trailers cover it.
+- Propose a few quick wins.
+- Pick and start the next task.
+
+Updates
+- Updated `TODO.md`:
+  - Marked “Paste: select ref” and “Paste: trailers” as [done].
+  - Deferred notes via git-notes as [later].
+  - Added “Dry-run enhancements v1/v2” and a few conveniences (list refs, packaging, Windows audit).
+  - Chosen next: “Dry-run enhancements v1: add commit count and top-level path summary to dry-run JSON outputs.”
+
+Picked next task
+- Dry-run enhancements v1:
+  - add commit_count for the imported ref/branch
+  - add top_level_paths summary (simple listing of top dirs/files under the import subdir, if applicable)
+  - surface both in:
+    - import-branch preview JSON
+    - merge-preview JSON
+
+If you’re good with that, I’ll implement it now and extend e2e to assert these fields appear in dry-run outputs.
+
+---
+
+_**User**_
+
+yes
+
+---
+
+_**Assistant**_
+
+
+```
+
+```
+Here’s the next step I proposed and just implemented: enhance dry-run previews with quick source summaries.
+
+Checklist
+- Picked next task: Dry-run enhancements v1. Done
+- Add commit_count and top_level_paths to import-branch preview JSON. Done
+- Add the same source_summary to merge-preview JSON. Done
+- Run e2e to ensure no regressions. Done (E2E OK)
+
+What changed
+
+- git-paste
+  - In dry-run, we now actually fetch the selected ref into the temp clone so we can inspect it safely.
+  - New helper summarize_branch() returns:
+    - commit_count: integer count of commits in the imported branch
+    - top_level_paths: up to 50 entries from ls-tree --name-only at the branch root
+    - top_level_paths_total: total entries
+    - top_level_paths_truncated: true/false if we truncated
+  - import-branch preview JSON now includes:
+    - head: SHA of the imported branch head
+    - source_summary: {commit_count, top_level_paths, ...}
+  - merge-preview preview JSON now includes:
+    - source_summary: same shape as above
+- Tests
+  - Ran e2e; previews show source_summary and head fields; all scenarios still pass.
+
+Example preview (import-branch)
+- head: 87af364...
+- source_summary:
+  - commit_count: 2
+  - top_level_paths: ["imported"]
+  - top_level_paths_total: 1
+  - top_level_paths_truncated: false
+
+Want me to:
+- add a tiny README note about the richer dry-run JSON? 
+- or implement list-refs (--list-refs) next?
+
+---
+
+_**User**_
+
+update readme first, then i'll commit
+
+---
+
+_**Assistant**_
+
+
+```
+
+```
+
+```
+
+```
+I’ll update the README to document the new dry-run JSON fields, then you can commit.
+
+- Added a “Dry-run JSON fields” subsection under Notes for dry-run.
+  - import-branch preview: action, as_branch, source_ref, remote, head, source_summary {commit_count, top_level_paths, top_level_paths_total, top_level_paths_truncated}
+  - merge-preview: target, source, no_ff, squash, conflicts, allow_unrelated_histories, auto_allow_unrelated_histories, trailers, source_summary, note
+- Fixed list indentation issues (no tabs) to satisfy markdown linters.
+
+You can commit these README changes now.
+
+---
+
+_**User**_
+
+done
+onto --list-refs
+
+---
+
+_**Assistant**_
+
+I’ll implement a new --list-refs flag in git-paste, update the README with usage, extend `e2e.sh` to test it, and run the tests to verify all pass. 
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+I’ll validate the new --list-refs flow by running the e2e suite and report the outcome.
+
+## actions taken
+- Ran the full e2e suite to exercise all flows, including the new list-refs scenario.
+- Observed expected dry-run enrichments on import-branch (head + source_summary) and merge-preview (source_summary + trailers flag).
+- Verified trailers on merge and squash include Clip-Ref and Clip-Head.
+- Confirmed list-refs outputs JSON with:
+  - action: "list-refs"
+  - refs: array of { sha, ref } including refs/heads/master and HEAD
+  - default_ref: "refs/heads/master"
+- Suite finished with “E2E OK”.
+
+## quality gates
+- Build: N/A
+- Lint/Typecheck: N/A
+- Tests: PASS (e2e)
+- Smoke: list-refs JSON shape and values correct
+
+## requirements coverage
+- Validate new --list-refs scenario via e2e: Done.
+
+## next steps
+- Dry-run v2: add size estimates and a small file sample in previews.
+- Docs: add a short jq snippet to parse list-refs output.
+- Packaging: pipx/brew install helpers and a quick Windows path/quoting audit.
+
+Anything you want me to pick first?
+
+---
+
+_**User**_
+
+todo.md updated, I think some of the backlog you have done though, go ahead and update, go ahead with dry-run v2
+
+---
+
+_**Assistant**_
+
+I’ll implement dry-run v2 by enhancing git-paste’s dry-run JSON with size estimates and change sampling, update the README and TODO, and then run the e2e tests to validate. 
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+Here’s the plan: sync TODO with what’s done, implement dry-run v2 previews, update docs, then run e2e to verify.
+
+## actions taken
+- Updated `TODO.md` to mark completed backlog items.
+- Implemented dry-run v2 in `git-paste`:
+  - Source summary now includes file_count, total_size_bytes, and largest_files (top 10).
+  - Merge preview now includes a diff_summary with files_changed, insertions, deletions, and a changes_sample (up to 50, including renames).
+- Updated `README.md` to document new dry-run fields and cleaned list formatting.
+- Ran full e2e; validated new fields appear and no regressions.
+
+## files changed
+- `git-paste`:
+  - Added summarize_branch size metrics and largest files.
+  - Added diff_sampling and included diff_summary in merge-preview dry-run output.
+- `README.md`:
+  - Documented dry-run v2 fields (size estimates + diff summary).
+  - Fixed indentation/lint issues.
+- `TODO.md`:
+  - Marked “Dry-run enhancements v2” as done; fixed list spacing.
+
+## results
+- e2e: PASS. New dry-run fields visible:
+  - source_summary: commit_count, top_level_paths(+totals), file_count, total_size_bytes, largest_files[{path,size}]
+  - merge-preview: diff_summary {range, files_changed, insertions, deletions, changes_sample}
+
+## quality gates
+- Build: N/A
+- Lint/Typecheck: README and TODO formatting fixed
+- Tests: PASS (e2e)
+- Smoke: list-refs still OK; trailers preserved; previews enriched
+
+## requirements coverage
+- Update TODO/backlog to reflect completed work: Done.
+- Implement dry-run v2 (size estimates + changed file sampling): Done.
+
+## next steps
+- Add small assertions in e2e to verify presence of file_count and diff_summary.
+- Optional docs tip: parsing diff_summary with jq.
+- Consider CHANGELOG entry for next version when you’re ready to tag.
+
+---
+
+_**User**_
+
+todo.md
+
+I think you did these, confirming
+- Tests: unitized test for obvious mode prompt path (added in e2e; consider splitting into shell functions)
+- Docs: document obvious mode and clipboard default with an example
+
+
+---
+
+_**Assistant**_
+
+
+```
+
+```
+
+```
+
+```
+Got it. I’ll confirm those TODOs and tidy the list.
+
+Checklist:
+- Mark docs for obvious mode + clipboard example as done
+- Clarify the test item status
+
+Updates made:
+- `TODO.md`
+  - Marked “[done] Docs: document obvious mode and clipboard default with an example”
+  - Clarified tests: “obvious mode prompt covered in e2e; optional unit test or refactor e2e into shell functions”
+  - Fixed list indentation to satisfy Markdown lint
+
+Status:
+- Docs: Done (README already contains both examples).
+- Tests: Covered in e2e; unitization optional.
+
+---
+
+_**User**_
+
+next? this was on the list:
+
+- Tests: obvious mode prompt covered in e2e; optional unit test or refactor e2e into shell functions
+
+
+---
+
+_**Assistant**_
+
+I’ll refactor the e2e script into shell functions to modularize scenarios and then run it to ensure everything still passes. 
+```
+
+```
+
+```
+
+```
+I’ll tackle that next by refactoring the e2e into functions and verifying it still passes.
+
+- Refactor e2e into shell functions per scenario
+- Run and fix any fallout
+
+Changes made:
+- `e2e.sh` now has:
+  - setup_fixture plus scenario_* functions for each case
+  - main orchestrating all scenarios
+  - Fixed a small typo: symbolic-ref
+- Verified with a full run; it ends with E2E OK and no errors.
+
+If you want a slimmer run (specific scenarios), we can add flags to select subsets next.
+
+---
+
+_**User**_
+
+- Packaging: 1) pipx wrapper, 2) Homebrew tap or simple install script
+
+discuss: should this project be made into a proper python packge prior to above?
+
+
+---
+
+_**Assistant**_
+
+Here’s a concise take on packaging vs. install options and a recommended path.
+
+Should we make it a proper Python package first?
+- pipx: Yes. pipx expects a Python package with console_scripts entry points. Packaging makes install/upgrade/uninstall trivial and reproducible.
+- Homebrew: Not required. Brew can install the raw scripts directly. Packaging helps if you prefer a brew formula that installs a PyPI package into a virtualenv.
+- Simple install script (curl/sh): Not required. You can just drop the scripts in PATH today.
+
+Pros of packaging now
+- One-command install via pipx (pipx install git-clipboard).
+- Clean console commands via entry points (git-cut, git-paste, git-clipboard).
+- Versioning and metadata in one place (pyproject.toml, __version__).
+- Easier future distribution (PyPI, Git tag installs, reproducible upgrades/downgrades).
+
+Cons
+- Minor upfront refactor (move script code into src/git_clipboard, add pyproject and entry points).
+- Release overhead (TestPyPI/PyPI workflow), though it’s light.
+
+Recommendation
+- Package first. It unlocks pipx cleanly and doesn’t block Homebrew or a simple install script.
+- For Homebrew you can do either:
+  - Quick path: formula that installs the scripts from a tagged tarball into bin (since we have no Python deps).
+  - More robust: formula that uses virtualenv_install_with_resources to install the PyPI package.
+
+Minimal packaging plan
+- Create src layout:
+  - src/git_clipboard/cut.py → exposes main()
+  - src/git_clipboard/paste.py → exposes main()
+  - src/git_clipboard/clipboard.py → exposes main() for status helper
+  - src/git_clipboard/__init__.py with __version__ = "0.2.1"
+- pyproject.toml (PEP 621 + hatchling or setuptools):
+  - project.name = "git-clipboard"
+  - dependencies: [] (only stdlib; runtime requires git and git-filter-repo)
+  - entry points:
+    - git-cut = git_clipboard.cut:main
+    - git-paste = git_clipboard.paste:main
+    - git-clipboard = git_clipboard.clipboard:main
+- Keep current scripts optionally as thin shims importing these mains for backward compatibility.
+- Tag and publish (TestPyPI → PyPI).
+- Docs:
+  - pipx: pipx install git-clipboard
+  - Homebrew (phase 1): simple tap formula that installs scripts from tag
+  - Homebrew (phase 2, optional): virtualenv formula installing from PyPI
+
+If you want, I can do the packaging refactor next and wire up pyproject + entry points.
+
+---
+
+_**User**_
+
+yes let's refactor to a package now
+
+NO, NOT NEEDED -> Keep current scripts optionally as thin shims importing these mains for backward compatibility.
+SKIP Homebrew for now
+YES to rest
+
+
+---
+
+_**Assistant**_
+
+I’ll refactor into a proper Python package with a src layout, add pyproject with console scripts, move code into package modules, update the e2e script to use python -m with PYTHONPATH, and then run the tests to verify all still pass. 
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+I'll inspect the README to fix malformed code fences and remaining tab-indented bullets, then apply precise edits. 
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+[object Object]
+
+---
+
+_**User**_
+
+@agent Continue: "Continue to iterate?"
+
+---
+
+_**Assistant**_
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+I’ll clean up the README formatting issues: remove stray global code fences and replace remaining tab-indented bullets with space-indented ones. 
+```
+
+```
+
+```
+
+```
+
+
+---
+
+_**User**_
+
+you seem to be stuck on problems with tabs in the readme. how about I work on that and you continue with the rest of the plan
+
+---
+
+_**Assistant**_
+
+I’ll gather the current packaging and test context (pyproject, version, changelog, e2e script) and pull the latest e2e output, so I can bump the version and prep a clean release while you tackle the README tabs. I’ll add release automation and tag-ready notes: update CHANGELOG for v0.2.1, create a PyPI publish workflow, and add a .gitignore; then I’ll rerun e2e to ensure no regressions. 
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+---
+
+_**User**_
+
+look at terminal output again, build was successfull
+
+---
+
+_**Assistant**_
+
+I’ll verify the build artifacts, re-run e2e for safety, and smoke-test the installed console scripts from the built wheel to confirm entry points work. 
+```
+
+```
+I added a file by mistake; I’ll revert that change to keep your workspace untouched. Here’s a concise wrap-up of the project history with a focus on the most recent commands and outcomes.
+
+## Overview
+- Built safety-first Git utilities: git-cut and git-paste with rich dry-run previews, obvious-mode clipboard defaults, and provenance trailers.
+- Added list-refs, conflict previews, prune-source, and comprehensive e2e coverage.
+- Migrated to a proper Python package with console entry points (git-cut, git-paste, git-clipboard).
+
+## Recent commands and results
+- End-to-end tests: Ran e2e.sh; final output concluded with “E2E OK …” confirming all scenarios pass.
+- Packaging/build:
+  - Built distributions successfully (wheel + sdist) for version 0.2.1.
+  - Initial wheel install failed (ModuleNotFoundError: package not included).
+  - Fixed pyproject to include src package in wheel/sdist, rebuilt, force-reinstalled; verified:
+    - Programmatic import works.
+    - Console scripts operational: git-clipboard prints status; git-cut and git-paste show usage.
+- Release automation: Added GitHub Actions workflow to publish to PyPI on GitHub Release; updated CHANGELOG to v0.2.1; expanded .gitignore; added Makefile and CONTRIBUTING.
+
+## Current status
+- All features through dry-run v2 are done; tests pass; packaging is fixed; entry points verified.
+- Branch: main; tags: v0.1.0, v0.2.0; artifacts for 0.2.1 are ready.
+
+## Pending
+- README formatting cleanup (tabs/fences) — in progress on your side.
+- Tag and publish v0.2.1: push tag, create GitHub Release to trigger the publish workflow; optionally add a pipx/PyPI install snippet afterward.
+
+---
+
+_**User**_
+
+we should delete the old files that are no longer needed. let's cleanup a little
+
+---
+
+_**Assistant**_
+
+I’ll scan the repo to identify legacy or duplicate files (e.g., old top-level scripts superseded by the package) so I can safely remove them. I’ll read the Org readme to see if it’s redundant with `README.md` and safe to remove, then update `e2e.sh` to rely on installed console scripts so we can delete the legacy top-level scripts safely. I’ll update `e2e.sh` to use installed console scripts (with a Python module fallback) and then remove the legacy top-level scripts that are now redundant. 
+```
+
+```
+I’ll finalize the cleanup by fixing e2e.sh’s Python fallback to include the package path, delete redundant legacy files and notes, and update the README to remove outdated script instructions. 
+```
+
+```
+[object Object]
+
+---
+
+_**User**_
+
+@agent Continue: "Continue to iterate?"
+
+---
+
+_**Assistant**_
+
+I’ll remove obsolete files (legacy scripts and scratch docs) and update the README to stop referencing the deleted scripts; then I’ll run the e2e tests to validate everything. 
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+I’ll run the end-to-end tests to ensure the cleanup didn’t break anything and confirm the new e2e helpers work. 
+
+---
+
+_**User**_
+
+the output is there, are you able to inspect terminal output right now? last line:
+E2E OK: /var/folders/7m/x22ztsz9201db1cyw7sn03h00000gn/T/gc-e2e-XXXX.9cbrYjUKQJ
+
+---
+
+_**Assistant**_
+
+I’ll pull the latest terminal output to confirm the e2e run and summarize any key results. Got it—seeing “E2E OK …” confirms the suite passed; I can’t pull the terminal buffer IDs right now, but that last line is sufficient.
+
+## What I did
+- Removed legacy top-level scripts and scratch files:
+  - Deleted: git-cut, git-paste, git-clipboard, readme.org, `workfile.md`
+- Updated e2e runner:
+  - Uses installed console scripts if present; falls back to python -m with PYTHONPATH=src
+- README cleanup:
+  - Dropped old chmod/symlink instructions; kept pipx install
+  - Fixed a few tab-indented bullets
+
+## Status
+- Quality gates: e2e PASS (per your output). No code changes beyond cleanup/docs.
+- Repo is now package-first: src layout + console entry points.
+
+## Next steps
+- Tag and publish v0.2.1 (triggers the publish workflow).
+- Optional: add a short PyPI install snippet once published.
+
+If you want, I can tag and push v0.2.1 now.
+
+---
+
+_**User**_
+
+go ahead
+
+---
+
+_**Assistant**_
+
+I’ll tag and publish v0.2.1 now, then confirm CI triggers.
+
+Checklist:
+- Create annotated tag v0.2.1 locally if missing.
+- Push tag to origin to trigger the publish workflow.
+- Report results and any manual follow-ups.
+
+Actions taken:
+- Created/checked local tag v0.2.1.
+- Attempted to push tag; the script handles auth gracefully. If the push didn’t go through, push manually:
+  - git push origin v0.2.1
+
+Next:
+- If push succeeded, create a GitHub Release for v0.2.1 to let the publish workflow run, or ensure your workflow is set to trigger on tag push/release as configured.
+- Optional: after publish, add a pipx install-from-PyPI snippet to `README.md`.
 
 ---
 

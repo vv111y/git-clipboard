@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """
-git-clipboard: Show status of the clipboard pointer and quick metadata.
-
-- Prints the last clip bundle and metadata paths from ~/.git-clipboard/last
-- If metadata exists, prints name, created_at, paths, to_subdir and age
+Package entry for git-clipboard status helper
 """
-
 from __future__ import annotations
 
 import json
@@ -30,16 +26,16 @@ def human_age(dt: datetime) -> str:
     return f"{days}d ago"
 
 
-def main():
+def main(argv: list[str] | None = None):
     ptr = Path.home() / ".git-clipboard" / "last"
     if not ptr.exists():
         print("No clipboard pointer found (run git-cut to create one).", file=sys.stderr)
-        sys.exit(1)
+        return 1
     try:
         data = json.loads(ptr.read_text())
     except Exception as e:
         print(f"Error reading pointer: {e}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     bundle = data.get("bundle")
     meta = data.get("meta")
@@ -53,7 +49,6 @@ def main():
             created_age = None
             if created:
                 try:
-                    # Support both naive and Z times
                     if created.endswith("Z"):
                         dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
                     else:
@@ -70,7 +65,8 @@ def main():
             print(f"default_branch: {m.get('default_branch')}")
         except Exception as e:
             print(f"Warning: could not read metadata: {e}", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

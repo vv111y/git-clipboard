@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "git-clipboard"
+version = "0.2.1"
+description = "Cut and paste Git history safely using bundles and git-filter-repo, with strong dry-run previews"
+readme = "README.md"
+authors = [
+  { name = "vv111y" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = ["git", "git-filter-repo", "bundle", "subtree", "history"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Topic :: Software Development :: Version Control :: Git",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/vv111y/git-clipboard"
+
+[project.scripts]
+git-cut = "git_clipboard.cut:main"
+git-paste = "git_clipboard.paste:main"
+git-clipboard = "git_clipboard.clipboard:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/git_clipboard"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/git_clipboard",
+  "pyproject.toml",
+  "README.md",
+  "CHANGELOG.md",
+  "LICENSE*",
+]

@@ -12,13 +12,11 @@ The heavy lifting is done by git-filter-repo; these commands try to make common 
 - Requirements: git, git-filter-repo
 - macOS: `brew install git-filter-repo`
 
-Make the scripts executable and add this folder to your PATH or symlink them:
+Python package (pipx) install for convenience:
 
 ```bash
-chmod +x git-cut git-paste
-# optional, symlink somewhere on PATH
-ln -s "$PWD/git-cut" /usr/local/bin/git-cut
-ln -s "$PWD/git-paste" /usr/local/bin/git-paste
+pipx install .
+# Afterwards the commands git-cut, git-paste, git-clipboard are available on your PATH
 ```
 
 ## git-cut
@@ -138,10 +136,10 @@ git-paste ../clips/clip.bundle --merge --allow-unrelated-histories --message "Im
 	- diff_summary: range, files_changed, insertions, deletions, changes_sample (up to 50 items; includes rename tuples)
 	- head: SHA of the imported branch tip
 	- source_summary: quick provenance of the imported branch
-		- commit_count: integer
-		- top_level_paths: up to 50 entries from the branch root
-		- top_level_paths_total: total entries
-		- top_level_paths_truncated: true if truncated
+	- commit_count: integer
+	- top_level_paths: up to 50 entries from the branch root
+	- top_level_paths_total: total entries
+	- top_level_paths_truncated: true if truncated
 
 - merge-preview includes:
 	- target, source, no_ff, squash, conflicts
@@ -176,9 +174,6 @@ git-paste ../clips/clip-20250101-120000.bundle --merge --allow-unrelated-histori
 Quick smoke test and demo:
 
 ```bash
-# Make the scripts executable (once)
-chmod +x git-cut git-paste
-
 # Run the end-to-end test; it prints JSON previews and ends with "E2E OK"
 bash ./e2e.sh
 ```

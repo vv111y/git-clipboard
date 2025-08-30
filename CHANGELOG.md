@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.1 — 2025-08-30
+
+Packaging and richer dry-run previews.
+
+### Features (v0.2.1)
+
+- Packaging
+  - Converted to a proper Python package (src layout) with console entry points:
+    - git-cut, git-paste, git-clipboard
+  - Added pyproject.toml (hatchling backend) and version bumped to 0.2.1.
+- git-paste (dry-run v2)
+  - Source summary now includes file_count, total_size_bytes, and largest_files.
+  - Added diff_summary with range, files_changed, insertions, deletions, and a sample of changes.
+- git-paste
+  - New `--list-refs` (`-L`) to enumerate bundle heads as JSON (with default_ref when metadata is present).
+
+### Tests (v0.2.1)
+
+- Refactored e2e.sh into functions per scenario for readability and faster targeting.
+- Validated new dry-run fields and list-refs through end-to-end runs.
+
+### Docs (v0.2.1)
+
+- README updated with pipx install note and documentation for new dry-run fields and list-refs.
+
+### Notes (v0.2.1)
+
+- Homebrew packaging is deferred; prefer pipx for now.
+
 ## v0.2.0 — 2025-08-30
 
 Ref selection on paste, commit message trailers, short flags, and status utility.

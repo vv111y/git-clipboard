@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
 """
-git-paste: Apply a git-clipboard bundle into a target repo, preserving history
-
-Two modes:
-- import: create a new branch from the bundle and optionally merge/rebase
-- fast-forward: add as remote and fetch, then merge selected ref(s)
-
-Default behavior:
-- If a metadata JSON is provided (or found by name), respect fields like to_subdir
-- By default, create a branch `clip/<name>` with the bundle's default branch tip
-- Optionally merge into current branch or a specified branch
+Package entry for git-paste
 """
-
 from __future__ import annotations
 
 import argparse
@@ -39,7 +29,7 @@ def is_git_repo(path: Path) -> bool:
         return False
 
 
-def parse_args():
+def parse_args(argv: list[str] | None = None):
     p = argparse.ArgumentParser(description="Apply a git-clipboard bundle into a target repo")
     p.add_argument("bundle", nargs="?", help="Path to the .bundle file (optional: defaults to last clip)")
     p.add_argument("-m", "--meta", help="Path to the metadata JSON produced by git-cut (optional)")
@@ -58,7 +48,7 @@ def parse_args():
     p.add_argument("-U", "--allow-unrelated-histories", action="store_true", help="Allow merging unrelated histories (recommended for imported clips)")
     p.add_argument("-p", "--prompt-merge", action="store_true", help="After creating import branch, prompt to auto-merge if preview is clean")
     p.add_argument("-T", "--trailers", action="store_true", help="Append clip metadata as commit message trailers on merge/squash commits")
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
 def current_branch(repo: Path) -> str:
@@ -89,7 +79,6 @@ def read_meta(meta_path: str | None, bundle_path: Path | None = None) -> dict | 
     if meta_path:
         candidate = Path(meta_path)
     elif bundle_path is not None:
-        # try alongside the bundle with same stem
         candidate = bundle_path.with_suffix('.json')
     if candidate and candidate.exists():
         try:
@@ -99,37 +88,34 @@ def read_meta(meta_path: str | None, bundle_path: Path | None = None) -> dict | 
     return None
 
 
-def main():
-    args = parse_args()
+def main(argv: list[str] | None = None):
+    args = parse_args(argv)
 
     if not which("git"):
         print("Error: git is required", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
-    # Resolve bundle path: explicit or from global clipboard pointer
     if args.bundle:
         bundle = Path(args.bundle).resolve()
     else:
         last_path = Path.home() / ".git-clipboard" / "last"
         if not last_path.exists():
             print("Error: no bundle specified and no last clip pointer found.", file=sys.stderr)
-            sys.exit(1)
+            return 1
         try:
             last = json.loads(last_path.read_text())
             bundle = Path(last.get("bundle", "")).resolve()
             if not bundle.exists():
                 print(f"Error: last bundle not found: {bundle}", file=sys.stderr)
-                sys.exit(1)
+                return 1
         except Exception as e:
             print(f"Error reading last clip pointer: {e}", file=sys.stderr)
-            sys.exit(1)
+            return 1
     if not bundle.exists():
         print(f"Error: bundle not found: {bundle}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
-    # If only listing refs, we don't need a git repo context
     if args.list_refs:
-        # Read metadata if present to surface default_ref
         meta_for_list = read_meta(args.meta, bundle)
         out = run(["git", "bundle", "list-heads", str(bundle)], capture_output=True)
         entries = []
@@ -150,12 +136,12 @@ def main():
         if meta_for_list and meta_for_list.get("default_branch"):
             payload["default_ref"] = normalize_for_list(meta_for_list["default_branch"])
         print(json.dumps(payload, indent=2))
-        return
+        return 0
 
     repo = Path(args.repo).resolve()
     if not is_git_repo(repo):
         print(f"Error: target is not a git repo: {repo}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     meta = read_meta(args.meta, bundle)
     as_branch = args.as_branch or default_as_branch_name(bundle, meta)
@@ -179,7 +165,6 @@ def main():
             lines.append(f"Clip-Head: {head_sha}")
         return "\n".join(lines)
 
-    # List heads in the bundle
     heads = run(["git", "bundle", "list-heads", str(bundle)], capture_output=True)
     lines = [line.strip() for line in heads.stdout.splitlines() if line.strip()]
     head_refs = []
@@ -191,10 +176,8 @@ def main():
     def normalize_ref(r: str) -> str:
         if r.startswith("refs/"):
             return r
-        # assume heads by default
         return f"refs/heads/{r}"
 
-    # Choose ref to import: explicit --ref, else metadata default_branch, else first head
     refspec = None
     sel = None
     if args.ref:
@@ -205,7 +188,7 @@ def main():
                 print("Available refs:", file=sys.stderr)
                 for r in head_refs:
                     print(f"  - {r}", file=sys.stderr)
-            sys.exit(1)
+            return 1
         refspec = sel
     elif meta and meta.get("default_branch"):
         cand = normalize_ref(meta["default_branch"])
@@ -214,7 +197,6 @@ def main():
     if refspec is None and head_refs:
         refspec = head_refs[0]
 
-    # Operate in a working repo: real target or a temporary clone for --dry-run
     work_repo = repo
     temp_dir = None
     remote_name = args.remote_name or f"bundle-{Path(bundle).stem}"
@@ -223,124 +205,108 @@ def main():
         work_repo = temp_dir / "repo"
         run(["git", "clone", "--no-local", "--no-hardlinks", str(repo), str(work_repo)])
 
-    # Create a branch from the bundle
-    # Use a temporary remote to fetch from the bundle (git supports bundle URLs via file path)
     try:
-        # Add remote pointing to bundle
-        # Using 'git fetch' directly from a bundle without adding a remote is also possible; prefer remote for clarity.
-        run(["git", "remote", "add", remote_name, str(bundle)], cwd=work_repo)
-    except Exception:
-        # Remote may already exist; try to set-url
         try:
-            run(["git", "remote", "set-url", remote_name, str(bundle)], cwd=work_repo)
+            run(["git", "remote", "add", remote_name, str(bundle)], cwd=work_repo)
         except Exception:
-            pass
+            try:
+                run(["git", "remote", "set-url", remote_name, str(bundle)], cwd=work_repo)
+            except Exception:
+                pass
 
-    import_head_sha: str | None = None
+        import_head_sha: str | None = None
 
-    def summarize_branch(repo_path: Path, branch: str) -> dict:
-        """Summarize branch contents and history.
+        def summarize_branch(repo_path: Path, branch: str) -> dict:
+            """Summarize branch contents and history.
 
-        Returns commit count, top-level paths, and size estimates including
-        total file count, aggregate byte size, and a sample of largest files.
-        """
-        # Commits
-        try:
-            cnt = run(["git", "rev-list", "--count", branch], cwd=repo_path, capture_output=True).stdout.strip()
-            commit_count = int(cnt) if cnt else 0
-        except Exception:
-            commit_count = 0
-        # Top-level (non-recursive) entry names for a quick glance
-        try:
-            names = run(["git", "ls-tree", "--name-only", branch], cwd=repo_path, capture_output=True).stdout.splitlines()
-        except Exception:
-            names = []
-        total_top = len(names)
-        MAX_TOP = 50
-        top_paths = names[:MAX_TOP]
-        # File inventory (recursive) with sizes
-        file_count = 0
-        total_size = 0
-        largest: list[tuple[int, str]] = []  # (size, path)
-        try:
-            out = run(["git", "ls-tree", "-r", "--long", branch], cwd=repo_path, capture_output=True).stdout
-            for line in out.splitlines():
-                # format: "<mode> <type> <sha> <size>\t<path>"
-                try:
-                    meta, path = line.split("\t", 1)
-                    parts = meta.split()
-                    if len(parts) >= 4 and parts[1] == "blob":
-                        size = int(parts[3]) if parts[3].isdigit() else 0
-                        file_count += 1
-                        total_size += size
-                        # track top 10 by size
-                        if len(largest) < 10:
-                            largest.append((size, path))
-                            largest.sort(reverse=True)
-                        else:
-                            if size > largest[-1][0]:
-                                largest[-1] = (size, path)
+            Returns commit count, top-level paths, and size estimates including
+            total file count, aggregate byte size, and a sample of largest files.
+            """
+            try:
+                cnt = run(["git", "rev-list", "--count", branch], cwd=repo_path, capture_output=True).stdout.strip()
+                commit_count = int(cnt) if cnt else 0
+            except Exception:
+                commit_count = 0
+            try:
+                names = run(["git", "ls-tree", "--name-only", branch], cwd=repo_path, capture_output=True).stdout.splitlines()
+            except Exception:
+                names = []
+            total_top = len(names)
+            MAX_TOP = 50
+            top_paths = names[:MAX_TOP]
+            file_count = 0
+            total_size = 0
+            largest: list[tuple[int, str]] = []
+            try:
+                out = run(["git", "ls-tree", "-r", "--long", branch], cwd=repo_path, capture_output=True).stdout
+                for line in out.splitlines():
+                    try:
+                        meta, path = line.split("\t", 1)
+                        parts = meta.split()
+                        if len(parts) >= 4 and parts[1] == "blob":
+                            size = int(parts[3]) if parts[3].isdigit() else 0
+                            file_count += 1
+                            total_size += size
+                            if len(largest) < 10:
+                                largest.append((size, path))
                                 largest.sort(reverse=True)
-                except Exception:
-                    continue
-        except Exception:
-            pass
-        largest_files = [{"path": p, "size": s} for s, p in largest]
-        return {
-            "commit_count": commit_count,
-            "top_level_paths": top_paths,
-            "top_level_paths_total": total_top,
-            "top_level_paths_truncated": bool(total_top > MAX_TOP),
-            "file_count": file_count,
-            "total_size_bytes": total_size,
-            "largest_files": largest_files,
-        }
+                            else:
+                                if size > largest[-1][0]:
+                                    largest[-1] = (size, path)
+                                    largest.sort(reverse=True)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            largest_files = [{"path": p, "size": s} for s, p in largest]
+            return {
+                "commit_count": commit_count,
+                "top_level_paths": top_paths,
+                "top_level_paths_total": total_top,
+                "top_level_paths_truncated": bool(total_top > MAX_TOP),
+                "file_count": file_count,
+                "total_size_bytes": total_size,
+                "largest_files": largest_files,
+            }
 
-    def diff_sampling(repo_path: Path, left: str, right: str) -> dict:
-        """Summarize changes from left..right with a small sample.
+        def diff_sampling(repo_path: Path, left: str, right: str) -> dict:
+            """Summarize changes from left..right with a small sample."""
+            changes_sample = []
+            try:
+                ns = run(["git", "diff", "--name-status", "--find-renames=50%", f"{left}..{right}"], cwd=repo_path, capture_output=True).stdout
+                for line in ns.splitlines()[:50]:
+                    parts = line.split("\t")
+                    if not parts:
+                        continue
+                    code = parts[0]
+                    if code.startswith("R") and len(parts) >= 3:
+                        changes_sample.append({"status": "R", "from": parts[1], "to": parts[2]})
+                    elif len(parts) >= 2:
+                        changes_sample.append({"status": code, "path": parts[1]})
+            except Exception:
+                pass
+            files_changed = insertions = deletions = 0
+            try:
+                ss = run(["git", "diff", "--shortstat", f"{left}..{right}"], cwd=repo_path, capture_output=True).stdout.strip()
+                import re as _re
+                m_files = _re.search(r"(\d+) files? changed", ss)
+                m_ins = _re.search(r"(\d+) insertions?\(\+\)", ss)
+                m_del = _re.search(r"(\d+) deletions?\(-\)", ss)
+                files_changed = int(m_files.group(1)) if m_files else 0
+                insertions = int(m_ins.group(1)) if m_ins else 0
+                deletions = int(m_del.group(1)) if m_del else 0
+            except Exception:
+                pass
+            return {
+                "range": f"{left}..{right}",
+                "files_changed": files_changed,
+                "insertions": insertions,
+                "deletions": deletions,
+                "changes_sample": changes_sample,
+            }
 
-        Includes files_changed, insertions, deletions and a sample of up to 50 changed entries.
-        """
-        # Sample list
-        changes_sample = []
-        try:
-            ns = run(["git", "diff", "--name-status", "--find-renames=50%", f"{left}..{right}"], cwd=repo_path, capture_output=True).stdout
-            for line in ns.splitlines()[:50]:
-                parts = line.split("\t")
-                if not parts:
-                    continue
-                code = parts[0]
-                if code.startswith("R") and len(parts) >= 3:
-                    changes_sample.append({"status": "R", "from": parts[1], "to": parts[2]})
-                elif len(parts) >= 2:
-                    changes_sample.append({"status": code, "path": parts[1]})
-        except Exception:
-            pass
-        # Totals from shortstat
-        files_changed = insertions = deletions = 0
-        try:
-            ss = run(["git", "diff", "--shortstat", f"{left}..{right}"], cwd=repo_path, capture_output=True).stdout.strip()
-            # Example: "3 files changed, 10 insertions(+), 2 deletions(-)"
-            import re as _re
-            m_files = _re.search(r"(\d+) files? changed", ss)
-            m_ins = _re.search(r"(\d+) insertions?\(\+\)", ss)
-            m_del = _re.search(r"(\d+) deletions?\(-\)", ss)
-            files_changed = int(m_files.group(1)) if m_files else 0
-            insertions = int(m_ins.group(1)) if m_ins else 0
-            deletions = int(m_del.group(1)) if m_del else 0
-        except Exception:
-            pass
-        return {
-            "range": f"{left}..{right}",
-            "files_changed": files_changed,
-            "insertions": insertions,
-            "deletions": deletions,
-            "changes_sample": changes_sample,
-        }
-    try:
         if refspec:
             if args.dry_run:
-                # In dry-run, fetch the selected ref into the temp clone to inspect summary safely
                 run(["git", "fetch", remote_name, f"{refspec}:{as_branch}"], cwd=work_repo)
                 import_head_sha = run(["git", "rev-parse", as_branch], cwd=work_repo, capture_output=True).stdout.strip()
                 summary = summarize_branch(work_repo, as_branch)
@@ -354,18 +320,15 @@ def main():
                 }, indent=2))
             else:
                 run(["git", "fetch", remote_name, f"{refspec}:{as_branch}"], cwd=work_repo)
-                # Capture head sha of the imported branch
                 import_head_sha = run(["git", "rev-parse", as_branch], cwd=work_repo, capture_output=True).stdout.strip()
         else:
-            # Fallback: fetch all heads
             if args.dry_run:
                 run(["git", "fetch", remote_name, f"refs/heads/*:refs/remotes/{remote_name}/*"], cwd=work_repo)
-                # Pick a remote branch to base from
                 out = run(["git", "branch", "-r"], cwd=work_repo, capture_output=True)
                 rheads = [line.strip() for line in out.stdout.splitlines() if line.strip().startswith(f"{remote_name}/")]
                 if not rheads:
                     print("Error: no heads found in bundle", file=sys.stderr)
-                    sys.exit(1)
+                    return 1
                 src = rheads[0]
                 run(["git", "branch", as_branch, src], cwd=work_repo)
                 import_head_sha = run(["git", "rev-parse", as_branch], cwd=work_repo, capture_output=True).stdout.strip()
@@ -380,13 +343,11 @@ def main():
                 }, indent=2))
             else:
                 run(["git", "fetch", remote_name, f"refs/heads/*:refs/remotes/{remote_name}/*"], cwd=work_repo)
-                # Pick a remote branch to base from
                 out = run(["git", "branch", "-r"], cwd=work_repo, capture_output=True)
                 rheads = [line.strip() for line in out.stdout.splitlines() if line.strip().startswith(f"{remote_name}/")]
                 if not rheads:
                     print("Error: no heads found in bundle", file=sys.stderr)
-                    sys.exit(1)
-                # Create local branch from the first
+                    return 1
                 src = rheads[0]
                 run(["git", "branch", as_branch, src], cwd=work_repo)
                 import_head_sha = run(["git", "rev-parse", as_branch], cwd=work_repo, capture_output=True).stdout.strip()
@@ -394,10 +355,8 @@ def main():
         if not args.dry_run:
             print(f"Imported branch: {as_branch}")
 
-        # Obvious mode: if no flags at all, preview and prompt to merge if clean
         obvious_mode = (not args.merge and not args.squash and not args.rebase and not args.dry_run and not args.prompt_merge)
 
-        # Merge if requested or in obvious mode
         if args.merge or args.squash or args.rebase or args.dry_run or obvious_mode:
             repo_has_commits = has_commits(work_repo)
             target_branch = args.branch or (current_branch(work_repo) if repo_has_commits else None)
@@ -412,10 +371,10 @@ def main():
                     }, indent=2))
                 else:
                     print("Target repo has no commits; skipping merge. Imported branch created.")
-                return
+                return 0
             if target_branch == "HEAD":
                 print("Error: cannot merge onto detached HEAD. Specify --branch.", file=sys.stderr)
-                sys.exit(1)
+                return 1
             run(["git", "rev-parse", "--verify", target_branch], cwd=work_repo)
 
             if not args.dry_run:
@@ -439,9 +398,6 @@ def main():
                 merge_cmd.append("--no-ff")
             if args.allow_unrelated_histories:
                 merge_cmd.append("--allow-unrelated-histories")
-            # Only add a message to the merge command if explicitly provided by the user.
-            # When adding trailers without a user message, we'll amend after merge to avoid
-            # clobbering Git's default merge message.
             if args.message:
                 merge_cmd += ["-m", args.message]
                 if args.trailers:
@@ -457,9 +413,7 @@ def main():
                 if base:
                     output = run(["git", "merge-tree", base, target_branch, as_branch], cwd=work_repo, capture_output=True).stdout
                     conflicts = ("<<<<<<<" in output or ">>>>>>>" in output)
-                # Summarize source branch
                 summary = summarize_branch(work_repo, as_branch)
-                # Diff sampling (use base..source when available, else target..source)
                 diff = diff_sampling(work_repo, base if base else target_branch, as_branch)
                 print(json.dumps({
                     "action": "merge-preview",
@@ -479,8 +433,7 @@ def main():
                     ans = input("Auto-merge now? [y/N]: ").strip().lower()
                     if ans not in ("y", "yes"):
                         print("Merge skipped by user.")
-                        return
-                    # Perform the actual merge now that user confirmed
+                        return 0
                     if not base and "--allow-unrelated-histories" not in merge_cmd:
                         merge_cmd.insert(2, "--allow-unrelated-histories")
                     run(merge_cmd, cwd=work_repo)
@@ -490,17 +443,16 @@ def main():
                             msg = f"{msg}\n\n{build_trailers(refspec, import_head_sha)}"
                         run(["git", "commit", "-m", msg], cwd=work_repo)
                     else:
-                        # If trailers requested without an explicit message, amend to append trailers
                         if args.trailers and not args.message:
                             existing = run(["git", "log", "-1", "--pretty=%B"], cwd=work_repo, capture_output=True).stdout
                             new_msg = f"{existing.strip()}\n\n{build_trailers(refspec, import_head_sha)}"
                             run(["git", "commit", "--amend", "-m", new_msg], cwd=work_repo)
                     if not args.dry_run:
                         print(f"Merged {as_branch} into {target_branch}")
-                    return
+                    return 0
                 elif obvious_mode:
                     print("Conflicts likely or unknown; not auto-merging.")
-                    return
+                    return 0
             elif args.prompt_merge:
                 try:
                     base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
@@ -525,10 +477,10 @@ def main():
                     ans = input("Auto-merge now? [y/N]: ").strip().lower()
                     if ans not in ("y", "yes"):
                         print("Merge skipped by user.")
-                        return
+                        return 0
                 else:
                     print("Conflicts likely or unknown; not auto-merging.")
-                    return
+                    return 0
             else:
                 try:
                     base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
@@ -544,7 +496,6 @@ def main():
                     msg = f"{msg}\n\n{build_trailers(refspec, import_head_sha)}"
                 run(["git", "commit", "-m", msg], cwd=work_repo)
 
-            # If a non-squash merge was performed (and not a preview), optionally append trailers
             if not (args.dry_run or obvious_mode) and not args.squash and args.trailers and not args.message:
                 existing = run(["git", "log", "-1", "--pretty=%B"], cwd=work_repo, capture_output=True).stdout
                 new_msg = f"{existing.strip()}\n\n{build_trailers(refspec, import_head_sha)}"
@@ -554,16 +505,16 @@ def main():
                 print(f"Merged {as_branch} into {target_branch}")
 
     finally:
-        # Clean up remote if we created it implicitly (in the actual repo path)
         if args.remote_name is None and not args.dry_run:
             try:
                 run(["git", "remote", "remove", remote_name], cwd=repo)
             except Exception:
                 pass
-        # Remove temporary clone used for dry-run
         if args.dry_run and temp_dir is not None:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
