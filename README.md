@@ -196,6 +196,10 @@ Run the end-to-end test script (creates temporary repos, cuts, dry-runs paste, t
 bash ./e2e.sh
 ```
 
+## Contributing
+
+See `CONTRIBUTING.md` for development setup and release process. For PyPI publishing setup, see `SETUP_PYPI.md`.
+
 ## Troubleshooting
 
 - If you see `git: 'filter-repo' is not a git command`, install git-filter-repo.

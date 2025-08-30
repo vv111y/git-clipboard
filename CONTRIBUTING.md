@@ -32,4 +32,5 @@ git push origin vX.Y.Z
 ```
 
 - If using GitHub Actions publish workflow, create a GitHub Release; the workflow will publish to PyPI using `PYPI_API_TOKEN`
+  - **First time setup**: See `SETUP_PYPI.md` for instructions on configuring the PyPI API token in GitHub repository secrets
 

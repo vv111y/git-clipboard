@@ -1,5 +1,8 @@
 name: Publish to PyPI
 
+# This workflow publishes the package to PyPI when a GitHub Release is created.
+# Setup required: Add PYPI_API_TOKEN to repository secrets (see SETUP_PYPI.md)
+
 on:
   release:
     types: [published]
@@ -20,4 +23,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__
+          # This secret must be configured in repository settings -> Secrets and variables -> Actions
+          # See SETUP_PYPI.md for setup instructions
           password: ${{ secrets.PYPI_API_TOKEN }}
