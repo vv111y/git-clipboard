@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -139,7 +138,10 @@ def main():
     parser.add_argument("--out-dir", default=".git-clipboard", help="Directory to write the clip bundle and metadata (default: ./.git-clipboard)")
     parser.add_argument("--name", default=default_clip_name(), help="Base name for the clip files (default: clip-YYYYmmdd-HHMMSS)")
     parser.add_argument("--force", action="store_true", help="Overwrite existing output files if present")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be included and planned outputs without creating a bundle")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary clone for debugging")
+    parser.add_argument("--prune-source", action="store_true", help="After a successful cut, delete the specified paths from the source repo and commit the removal")
+    parser.add_argument("--require-ack", default=None, help="Path to an ack file produced by git-paste --ack; if provided, pruning only proceeds if ack exists")
 
     args = parser.parse_args()
 
@@ -160,9 +162,37 @@ def main():
 
     out_dir = Path(args.out_dir).resolve()
     bundle_path, meta_path = make_clip_paths(out_dir, args.name)
-    if (bundle_path.exists() or meta_path.exists()) and not args.force:
+    if (bundle_path.exists() or meta_path.exists()) and not args.force and not args.dry_run:
         print(f"Error: {bundle_path.name} or {meta_path.name} already exists in {out_dir}. Use --force to overwrite.", file=sys.stderr)
         sys.exit(1)
+
+    if args.dry_run:
+        # Summarize what would be kept
+        try:
+            # Count commits touching the paths
+            rev_count = run(["git", "rev-list", "--all", "--count", "--", *args.paths], cwd=src_repo, capture_output=True).stdout.strip()
+        except Exception:
+            rev_count = "unknown"
+        try:
+            sample = run(["git", "log", "--oneline", "-n", "5", "--", *args.paths], cwd=src_repo, capture_output=True).stdout.strip()
+        except Exception:
+            sample = ""
+        mapping = []
+        for p in args.paths:
+            dst = f"{args.to_subdir.rstrip('/')}/{p}" if args.to_subdir else p
+            mapping.append((p, dst))
+        plan = {
+            "repo": str(src_repo),
+            "paths": args.paths,
+            "to_subdir": args.to_subdir,
+            "commit_count_touching_paths": rev_count,
+            "sample_commits": sample.splitlines(),
+            "path_mapping_preview": [{"from": src, "to": dst} for src, dst in mapping],
+            "outputs": {"bundle": str(bundle_path), "metadata": str(meta_path), "out_dir": str(out_dir)},
+            "note": "No files created due to --dry-run",
+        }
+        print(json.dumps(plan, indent=2))
+        return
 
     temp_dir = Path(tempfile.mkdtemp(prefix="git-cut-"))
     temp_repo = temp_dir / "repo"
@@ -201,6 +231,7 @@ def main():
             "filter_repo_invocation": " ".join(filter_repo_cmd),
             "default_branch": default_branch,
             "source_remotes": gather_repo_remotes(src_repo),
+            "ack_file_suggestion": str(meta_path.with_suffix('.ack')),
         }
         if meta_path.exists() and args.force:
             meta_path.unlink()
@@ -208,6 +239,26 @@ def main():
 
         print(str(bundle_path))
         print(str(meta_path))
+
+        # Optional prune step on the source repo
+        if args.prune_source:
+            # Preconditions: clean working tree, not in the temp repo
+            status = run(["git", "status", "--porcelain"], cwd=src_repo, capture_output=True).stdout.strip()
+            if status:
+                print("Error: working tree not clean; aborting prune.", file=sys.stderr)
+                sys.exit(1)
+            # Optional ack
+            if args.require_ack:
+                ack_path = Path(args.require_ack)
+                if not ack_path.exists():
+                    print(f"Error: ack file not found: {ack_path}", file=sys.stderr)
+                    sys.exit(1)
+            # Record the cut HEAD for traceability
+            head = run(["git", "rev-parse", "--short", "HEAD"], cwd=src_repo, capture_output=True).stdout.strip()
+            # Remove the paths and commit
+            run(["git", "rm", "-r", "--ignore-unmatch", *args.paths], cwd=src_repo)
+            msg = f"Move to new repo via clip {bundle_path.name} (cut from {head})"
+            run(["git", "commit", "-m", msg], cwd=src_repo)
     finally:
         if args.keep_temp:
             print(f"Temp repo kept at: {temp_repo}")

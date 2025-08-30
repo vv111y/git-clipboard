@@ -19,6 +19,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -51,6 +52,9 @@ def parse_args():
     p.add_argument("--remote-name", default=None, help="Optional remote name to add for the bundle (will be removed after)")
     p.add_argument("--no-ff", action="store_true", help="Disable fast-forward during merge")
     p.add_argument("--message", default=None, help="Custom merge commit message")
+    p.add_argument("--dry-run", action="store_true", help="Preview import and potential merge/conflicts without changing the repo")
+    p.add_argument("--allow-unrelated-histories", action="store_true", help="Allow merging unrelated histories (recommended for imported clips)")
+    p.add_argument("--prompt-merge", action="store_true", help="After creating import branch, prompt to auto-merge if preview is clean")
     return p.parse_args()
 
 
@@ -60,6 +64,14 @@ def current_branch(repo: Path) -> str:
     if b == "HEAD":
         return "HEAD"
     return b
+
+
+def has_commits(repo: Path) -> bool:
+    try:
+        run(["git", "rev-parse", "-q", "--verify", "HEAD"], cwd=repo)
+        return True
+    except Exception:
+        return False
 
 
 def default_as_branch_name(bundle_path: Path, meta: dict | None) -> str:
@@ -115,81 +127,195 @@ def main():
         if len(parts) >= 2:
             refspec = parts[1]
 
+    # Operate in a working repo: real target or a temporary clone for --dry-run
+    work_repo = repo
+    temp_dir = None
+    remote_name = args.remote_name or f"bundle-{Path(bundle).stem}"
+    if args.dry_run:
+        temp_dir = Path(tempfile.mkdtemp(prefix="git-paste-dry-"))
+        work_repo = temp_dir / "repo"
+        run(["git", "clone", "--no-local", "--no-hardlinks", str(repo), str(work_repo)])
+
     # Create a branch from the bundle
     # Use a temporary remote to fetch from the bundle (git supports bundle URLs via file path)
-    remote_name = args.remote_name or f"bundle-{Path(bundle).stem}"
     try:
         # Add remote pointing to bundle
         # Using 'git fetch' directly from a bundle without adding a remote is also possible; prefer remote for clarity.
-        run(["git", "remote", "add", remote_name, str(bundle)], cwd=repo)
+        run(["git", "remote", "add", remote_name, str(bundle)], cwd=work_repo)
     except Exception:
         # Remote may already exist; try to set-url
         try:
-            run(["git", "remote", "set-url", remote_name, str(bundle)], cwd=repo)
+            run(["git", "remote", "set-url", remote_name, str(bundle)], cwd=work_repo)
         except Exception:
             pass
 
     try:
         if refspec:
-            run(["git", "fetch", remote_name, f"{refspec}:{as_branch}"], cwd=repo)
+            if args.dry_run:
+                # Verify fetch-ability and existence of ref in bundle without creating branch
+                # Use ls-remote-like list-heads already obtained; simulate branch name
+                print(json.dumps({
+                    "action": "import-branch",
+                    "as_branch": as_branch,
+                    "source_ref": refspec,
+                    "remote": remote_name,
+                }, indent=2))
+            else:
+                run(["git", "fetch", remote_name, f"{refspec}:{as_branch}"], cwd=work_repo)
         else:
             # Fallback: fetch all heads
-            run(["git", "fetch", remote_name, f"refs/heads/*:refs/remotes/{remote_name}/*"], cwd=repo)
-            # Pick a remote branch to base from
-            out = run(["git", "branch", "-r"], cwd=repo, capture_output=True)
-            rheads = [line.strip() for line in out.stdout.splitlines() if line.strip().startswith(f"{remote_name}/")]
-            if not rheads:
-                print("Error: no heads found in bundle", file=sys.stderr)
-                sys.exit(1)
-            # Create local branch from the first
-            src = rheads[0]
-            run(["git", "branch", as_branch, src], cwd=repo)
+            if args.dry_run:
+                print(json.dumps({
+                    "action": "import-branch",
+                    "as_branch": as_branch,
+                    "source_ref": "refs/heads/*",
+                    "remote": remote_name,
+                }, indent=2))
+            else:
+                run(["git", "fetch", remote_name, f"refs/heads/*:refs/remotes/{remote_name}/*"], cwd=work_repo)
+                # Pick a remote branch to base from
+                out = run(["git", "branch", "-r"], cwd=work_repo, capture_output=True)
+                rheads = [line.strip() for line in out.stdout.splitlines() if line.strip().startswith(f"{remote_name}/")]
+                if not rheads:
+                    print("Error: no heads found in bundle", file=sys.stderr)
+                    sys.exit(1)
+                # Create local branch from the first
+                src = rheads[0]
+                run(["git", "branch", as_branch, src], cwd=work_repo)
 
-        print(f"Imported branch: {as_branch}")
+        if not args.dry_run:
+            print(f"Imported branch: {as_branch}")
 
         # Merge if requested
-        if args.merge or args.squash or args.rebase:
-            target_branch = args.branch or current_branch(repo)
+        if args.merge or args.squash or args.rebase or args.dry_run:
+            repo_has_commits = has_commits(work_repo)
+            target_branch = args.branch or (current_branch(work_repo) if repo_has_commits else None)
+            if not repo_has_commits:
+                if args.dry_run:
+                    print(json.dumps({
+                        "action": "merge-preview",
+                        "target": None,
+                        "source": as_branch,
+                        "note": "Target repo has no commits; merge would effectively adopt imported branch after creation.",
+                        "conflicts": False
+                    }, indent=2))
+                else:
+                    print("Target repo has no commits; skipping merge. Imported branch created.")
+                # Nothing else to do in this section
+                return
             if target_branch == "HEAD":
                 print("Error: cannot merge onto detached HEAD. Specify --branch.", file=sys.stderr)
                 sys.exit(1)
             # Ensure target branch exists
-            run(["git", "rev-parse", "--verify", target_branch], cwd=repo)
+            run(["git", "rev-parse", "--verify", target_branch], cwd=work_repo)
 
             # Ensure we are on the target branch
-            run(["git", "checkout", target_branch], cwd=repo)
+            if not args.dry_run:
+                run(["git", "checkout", target_branch], cwd=work_repo)
 
             # Optional rebase of imported branch onto target
             if args.rebase:
                 # This form checks out `as_branch`, rebases it onto target_branch
-                run(["git", "rebase", target_branch, as_branch], cwd=repo)
-                # Return to target branch for the merge step
-                run(["git", "checkout", target_branch], cwd=repo)
+                if args.dry_run:
+                    print(json.dumps({
+                        "action": "rebase",
+                        "branch": as_branch,
+                        "onto": target_branch
+                    }, indent=2))
+                else:
+                    run(["git", "rebase", target_branch, as_branch], cwd=work_repo)
+                    # Return to target branch for the merge step
+                    run(["git", "checkout", target_branch], cwd=work_repo)
 
             merge_cmd = ["git", "merge"]
             if args.squash:
                 merge_cmd.append("--squash")
             if args.no_ff:
                 merge_cmd.append("--no-ff")
+            if args.allow_unrelated_histories:
+                merge_cmd.append("--allow-unrelated-histories")
             if args.message:
                 merge_cmd += ["-m", args.message]
             merge_cmd.append(as_branch)
-            run(merge_cmd, cwd=repo)
+
+            if args.dry_run:
+                # Use merge-tree to detect conflicts without touching the working tree
+                try:
+                    base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
+                except Exception:
+                    base = ""
+                conflicts = None
+                if base:
+                    output = run(["git", "merge-tree", base, target_branch, as_branch], cwd=work_repo, capture_output=True).stdout
+                    conflicts = ("<<<<<<<" in output or ">>>>>>>" in output)
+                print(json.dumps({
+                    "action": "merge-preview",
+                    "target": target_branch,
+                    "source": as_branch,
+                    "no_ff": args.no_ff,
+                    "squash": args.squash,
+                    "conflicts": conflicts,
+                    "allow_unrelated_histories": args.allow_unrelated_histories,
+                    "auto_allow_unrelated_histories": (not base),
+                    "note": None if base else "Could not determine merge-base; conflict status unknown"
+                }, indent=2))
+            elif args.prompt_merge:
+                # Non-dry-run preview + prompt before actually merging
+                try:
+                    base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
+                except Exception:
+                    base = ""
+                conflicts = None
+                if base:
+                    output = run(["git", "merge-tree", base, target_branch, as_branch], cwd=work_repo, capture_output=True).stdout
+                    conflicts = ("<<<<<<<" in output or ">>>>>>>" in output)
+                print(json.dumps({
+                    "action": "merge-preview",
+                    "target": target_branch,
+                    "source": as_branch,
+                    "no_ff": args.no_ff,
+                    "squash": args.squash,
+                    "conflicts": conflicts,
+                    "allow_unrelated_histories": args.allow_unrelated_histories,
+                    "note": None if base else "Could not determine merge-base; conflict status unknown"
+                }, indent=2))
+                if conflicts is False:
+                    ans = input("Auto-merge now? [y/N]: ").strip().lower()
+                    if ans not in ("y", "yes"):
+                        print("Merge skipped by user.")
+                        return
+                else:
+                    print("Conflicts likely or unknown; not auto-merging.")
+                    return
+            else:
+                # Auto enable --allow-unrelated-histories if there is no merge-base
+                try:
+                    base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
+                except Exception:
+                    base = ""
+                if not base and "--allow-unrelated-histories" not in merge_cmd:
+                    merge_cmd.insert(2, "--allow-unrelated-histories")
+                run(merge_cmd, cwd=work_repo)
 
             if args.squash:
                 # Finalize squash merge with a commit
                 msg = args.message or f"Squash import from {as_branch}"
-                run(["git", "commit", "-m", msg], cwd=repo)
+                if not args.dry_run:
+                    run(["git", "commit", "-m", msg], cwd=work_repo)
 
-            print(f"Merged {as_branch} into {target_branch}")
+            if not args.dry_run:
+                print(f"Merged {as_branch} into {target_branch}")
 
     finally:
-        # Clean up remote if we created it implicitly
-        if args.remote_name is None:
+        # Clean up remote if we created it implicitly (in the actual repo path)
+        if args.remote_name is None and not args.dry_run:
             try:
                 run(["git", "remote", "remove", remote_name], cwd=repo)
             except Exception:
                 pass
+        # Remove temporary clone used for dry-run
+        if args.dry_run and temp_dir is not None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
