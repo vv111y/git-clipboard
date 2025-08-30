@@ -12,13 +12,15 @@ CLIPS="$TMP_ROOT/clips"
 DST2="$TMP_ROOT/dst2"
 DST3="$TMP_ROOT/dst3"
 DST4="$TMP_ROOT/dst4"
+DST5="$TMP_ROOT/dst5"
+DST6="$TMP_ROOT/dst6"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
 
-mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4"
+mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4" "$DST5" "$DST6"
 
 git -C "$SRC" init -q
 mkdir -p "$SRC/proj/a" "$SRC/proj/b"
@@ -106,5 +108,29 @@ git -C "$DST4" add -A && git -C "$DST4" commit -qm "chore: note"
 printf 'y\n' | "$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST4" | sed -n '1,120p'
 echo "== Obvious Mode Log =="
 git -C "$DST4" log --graph --oneline --decorate -n 8 | sed -n '1,120p'
+
+# Scenario 6: Merge with trailers appended to commit message
+git -C "$DST5" init -q
+BR_DST5=$(git -C "$DST5" symbolic-ref -q --short HEAD || echo master)
+git -C "$DST5" commit --allow-empty -qm "chore: initial"
+"$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST5" --merge --allow-unrelated-histories --message "Import clip" --trailers | sed -n '1,120p'
+LAST_MSG=$(git -C "$DST5" log -1 --pretty=%B)
+echo "== Merge with trailers commit message =="
+echo "$LAST_MSG" | sed -n '1,80p'
+echo "$LAST_MSG" | grep -q "Clip-Bundle:" || { echo "ERROR: expected Clip-Bundle trailer in merge commit" >&2; exit 1; }
+echo "$LAST_MSG" | grep -q "Clip-Ref:" || { echo "ERROR: expected Clip-Ref trailer in merge commit" >&2; exit 1; }
+echo "$LAST_MSG" | grep -q "Clip-Head:" || { echo "ERROR: expected Clip-Head trailer in merge commit" >&2; exit 1; }
+
+# Scenario 7: Squash with trailers appended to commit message
+git -C "$DST6" init -q
+BR_DST6=$(git -C "$DST6" symbolic-ref -q --short HEAD || echo master)
+git -C "$DST6" commit --allow-empty -qm "chore: initial"
+"$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --repo "$DST6" --merge --squash --allow-unrelated-histories --message "Squash Import" --trailers | sed -n '1,120p'
+LAST_MSG2=$(git -C "$DST6" log -1 --pretty=%B)
+echo "== Squash with trailers commit message =="
+echo "$LAST_MSG2" | sed -n '1,80p'
+echo "$LAST_MSG2" | grep -q "Clip-Bundle:" || { echo "ERROR: expected Clip-Bundle trailer in squash commit" >&2; exit 1; }
+echo "$LAST_MSG2" | grep -q "Clip-Ref:" || { echo "ERROR: expected Clip-Ref trailer in squash commit" >&2; exit 1; }
+echo "$LAST_MSG2" | grep -q "Clip-Head:" || { echo "ERROR: expected Clip-Head trailer in squash commit" >&2; exit 1; }
 
 echo "E2E OK: $TMP_ROOT"

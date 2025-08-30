@@ -53,7 +53,7 @@ Import a previously created bundle into a target repository. By default it creat
 Usage
 
 ```bash
-git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [-b BRANCH] [--merge|-M|--squash|-s|--rebase|-R] [--no-ff|-F] [--message|-j MSG] [--dry-run|-d] [--allow-unrelated-histories|-U] [--prompt-merge|-p]
+git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [--ref REF] [-b BRANCH] [--merge|-M|--squash|-s|--rebase|-R] [--no-ff|-F] [--message|-j MSG] [--dry-run|-d] [--allow-unrelated-histories|-U] [--prompt-merge|-p] [--trailers|-T]
 ```
 
 ### Default behavior
@@ -61,6 +61,11 @@ git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [-b BRANCH] [--merge|-M|--
 - Creates a branch `clip/<bundle-base-name>` from the bundle's first head
 - If --merge/--squash/--rebase is given, merges into the current branch (or --branch)
 - Cleans up a temporary remote used for fetching from the bundle
+
+### Ref selection
+
+- Use `--ref` to pick a specific ref from the bundle (e.g., `--ref main` or `--ref refs/heads/main`).
+- If omitted, git-paste tries the metadata `default_branch` from the clip. If not available, it falls back to the first head in the bundle.
 
 ### Clipboard default and obvious mode
 
@@ -75,6 +80,29 @@ git-cut path/to/subtree --out-dir ../clips --to-subdir imported
 
 # In target repo, just paste with no args. If clean, confirm to auto-merge.
 git-paste
+```
+
+### Trailers (provenance in commit messages)
+
+- Use `--trailers` (`-T`) to append clip metadata as trailers to merge or squash commit messages.
+- Trailers include: `Clip-Bundle`, `Clip-Source` (if available), `Clip-Paths`, `Clip-Subdir`, `Clip-Created-At`, `Clip-Ref` (imported ref), and `Clip-Head` (SHA of imported branch head).
+- Behavior:
+	- If you pass `--message`, trailers are added as an extra paragraph.
+	- If you don’t pass `--message`, for non-squash merges the default merge message is preserved and we amend to append trailers.
+	- For squash merges, trailers are appended to the squash commit message.
+
+Example:
+
+```bash
+git-paste ../clips/clip.bundle --merge --allow-unrelated-histories --message "Import clip" --trailers
+# Commit message ends with:
+# Clip-Bundle: clip.bundle
+# Clip-Source: git@github.com:me/repo.git
+# Clip-Paths: proj/a
+# Clip-Subdir: imported
+# Clip-Created-At: 2025-01-01T12:00:00Z
+# Clip-Ref: refs/heads/main
+# Clip-Head: abcdef1234567890...
 ```
 
 ### Notes for dry-run

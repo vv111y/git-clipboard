@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.0 — 2025-08-30
+
+Ref selection on paste, commit message trailers, short flags, and status utility.
+
+### Features (v0.2.0)
+
+- git-paste
+  - New `--ref` option to select a specific ref from the bundle (e.g., `--ref main` or `refs/heads/main`).
+  - New `--trailers` option to append clip provenance as commit message trailers on merges and squashes:
+    - Clip-Bundle, Clip-Source, Clip-Paths, Clip-Subdir, Clip-Created-At, Clip-Ref, Clip-Head.
+  - Obvious mode and prompted preview JSON now include `trailers` flag.
+  - Keeps default merge message when no `--message` is provided; trailers are appended via amend.
+
+- git-cut / git-paste
+  - Added short flags for frequent options (e.g., -r, -d, -m, -p, -T).
+
+- git-clipboard
+  - New helper to display the current clipboard pointer and basic clip metadata.
+
+### Tests (v0.2.0)
+
+- Extended e2e to cover:
+  - Clipboard default (no-arg paste) and obvious-mode auto-merge prompt.
+  - Merge with `--trailers` and Squash with `--trailers` (assert Clip-* lines exist, including Clip-Ref and Clip-Head).
+
+### Docs (v0.2.0)
+
+- README updated with `--ref` selection, and a new Trailers section with examples.
+
+### Notes (v0.2.0)
+
+- Dry-run previews unaffected (no repo changes); trailers flag is surfaced in preview JSON.
+
+
 ## v0.1.0 — 2025-08-30
 
 Initial public cut/paste workflow with safety, previews, and a smooth default UX.
