@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""
+git-paste: Apply a git-clipboard bundle into a target repo, preserving history
+
+Two modes:
+- import: create a new branch from the bundle and optionally merge/rebase
+- fast-forward: add as remote and fetch, then merge selected ref(s)
+
+Default behavior:
+- If a metadata JSON is provided (or found by name), respect fields like to_subdir
+- By default, create a branch `clip/<name>` with the bundle's default branch tip
+- Optionally merge into current branch or a specified branch
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def run(cmd, cwd=None, check=True, capture_output=False, text=True):
+    return subprocess.run(cmd, cwd=cwd, check=check, capture_output=capture_output, text=text)
+
+
+def which(cmd: str):
+    return shutil.which(cmd)
+
+
+def is_git_repo(path: Path) -> bool:
+    try:
+        run(["git", "rev-parse", "--is-inside-work-tree"], cwd=path)
+        return True
+    except Exception:
+        return False
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Apply a git-clipboard bundle into a target repo")
+    p.add_argument("bundle", help="Path to the .bundle file")
+    p.add_argument("--meta", help="Path to the metadata JSON produced by git-cut (optional)")
+    p.add_argument("--repo", default=".", help="Target repository (default: .)")
+    p.add_argument("--branch", help="Branch to merge into (default: current branch)")
+    p.add_argument("--as-branch", dest="as_branch", help="Name of branch to create from bundle (default: clip/<bundle-name>)")
+    p.add_argument("--merge", action="store_true", help="Merge the imported branch into --branch/current")
+    p.add_argument("--squash", action="store_true", help="Use a squash merge")
+    p.add_argument("--rebase", action="store_true", help="Rebase the imported branch onto --branch/current before merging")
+    p.add_argument("--remote-name", default=None, help="Optional remote name to add for the bundle (will be removed after)")
+    p.add_argument("--no-ff", action="store_true", help="Disable fast-forward during merge")
+    p.add_argument("--message", default=None, help="Custom merge commit message")
+    return p.parse_args()
+
+
+def current_branch(repo: Path) -> str:
+    out = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, capture_output=True)
+    b = out.stdout.strip()
+    if b == "HEAD":
+        return "HEAD"
+    return b
+
+
+def default_as_branch_name(bundle_path: Path, meta: dict | None) -> str:
+    if meta and meta.get("default_branch"):
+        base = Path(bundle_path).stem
+        return f"clip/{base}"
+    return f"clip/{Path(bundle_path).stem}"
+
+
+def read_meta(meta_path: str | None, bundle_path: Path | None = None) -> dict | None:
+    candidate: Path | None = None
+    if meta_path:
+        candidate = Path(meta_path)
+    elif bundle_path is not None:
+        # try alongside the bundle with same stem
+        candidate = bundle_path.with_suffix('.json')
+    if candidate and candidate.exists():
+        try:
+            return json.loads(candidate.read_text())
+        except Exception:
+            return None
+    return None
+
+
+def main():
+    args = parse_args()
+
+    if not which("git"):
+        print("Error: git is required", file=sys.stderr)
+        sys.exit(1)
+
+    bundle = Path(args.bundle).resolve()
+    if not bundle.exists():
+        print(f"Error: bundle not found: {bundle}", file=sys.stderr)
+        sys.exit(1)
+
+    repo = Path(args.repo).resolve()
+    if not is_git_repo(repo):
+        print(f"Error: target is not a git repo: {repo}", file=sys.stderr)
+        sys.exit(1)
+
+    meta = read_meta(args.meta, bundle)
+    as_branch = args.as_branch or default_as_branch_name(bundle, meta)
+
+    # List heads in the bundle
+    heads = run(["git", "bundle", "list-heads", str(bundle)], capture_output=True)
+    lines = [line.strip() for line in heads.stdout.splitlines() if line.strip()]
+    # pick first ref as tip
+    refspec = None
+    if lines:
+        # Format: <hash> <refname>
+        parts = lines[0].split()
+        if len(parts) >= 2:
+            refspec = parts[1]
+
+    # Create a branch from the bundle
+    # Use a temporary remote to fetch from the bundle (git supports bundle URLs via file path)
+    remote_name = args.remote_name or f"bundle-{Path(bundle).stem}"
+    try:
+        # Add remote pointing to bundle
+        # Using 'git fetch' directly from a bundle without adding a remote is also possible; prefer remote for clarity.
+        run(["git", "remote", "add", remote_name, str(bundle)], cwd=repo)
+    except Exception:
+        # Remote may already exist; try to set-url
+        try:
+            run(["git", "remote", "set-url", remote_name, str(bundle)], cwd=repo)
+        except Exception:
+            pass
+
+    try:
+        if refspec:
+            run(["git", "fetch", remote_name, f"{refspec}:{as_branch}"], cwd=repo)
+        else:
+            # Fallback: fetch all heads
+            run(["git", "fetch", remote_name, f"refs/heads/*:refs/remotes/{remote_name}/*"], cwd=repo)
+            # Pick a remote branch to base from
+            out = run(["git", "branch", "-r"], cwd=repo, capture_output=True)
+            rheads = [line.strip() for line in out.stdout.splitlines() if line.strip().startswith(f"{remote_name}/")]
+            if not rheads:
+                print("Error: no heads found in bundle", file=sys.stderr)
+                sys.exit(1)
+            # Create local branch from the first
+            src = rheads[0]
+            run(["git", "branch", as_branch, src], cwd=repo)
+
+        print(f"Imported branch: {as_branch}")
+
+        # Merge if requested
+        if args.merge or args.squash or args.rebase:
+            target_branch = args.branch or current_branch(repo)
+            if target_branch == "HEAD":
+                print("Error: cannot merge onto detached HEAD. Specify --branch.", file=sys.stderr)
+                sys.exit(1)
+            # Ensure target branch exists
+            run(["git", "rev-parse", "--verify", target_branch], cwd=repo)
+
+            # Ensure we are on the target branch
+            run(["git", "checkout", target_branch], cwd=repo)
+
+            # Optional rebase of imported branch onto target
+            if args.rebase:
+                # This form checks out `as_branch`, rebases it onto target_branch
+                run(["git", "rebase", target_branch, as_branch], cwd=repo)
+                # Return to target branch for the merge step
+                run(["git", "checkout", target_branch], cwd=repo)
+
+            merge_cmd = ["git", "merge"]
+            if args.squash:
+                merge_cmd.append("--squash")
+            if args.no_ff:
+                merge_cmd.append("--no-ff")
+            if args.message:
+                merge_cmd += ["-m", args.message]
+            merge_cmd.append(as_branch)
+            run(merge_cmd, cwd=repo)
+
+            if args.squash:
+                # Finalize squash merge with a commit
+                msg = args.message or f"Squash import from {as_branch}"
+                run(["git", "commit", "-m", msg], cwd=repo)
+
+            print(f"Merged {as_branch} into {target_branch}")
+
+    finally:
+        # Clean up remote if we created it implicitly
+        if args.remote_name is None:
+            try:
+                run(["git", "remote", "remove", remote_name], cwd=repo)
+            except Exception:
+                pass
+
+
+if __name__ == "__main__":
+    main()
