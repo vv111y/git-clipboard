@@ -111,6 +111,23 @@ git-paste ../clips/clip.bundle --merge --allow-unrelated-histories --message "Im
 - Use `--allow-unrelated-histories` when you later perform a real merge of unrelated histories (often required for fresh repos).
 - Use `--prompt-merge` to preview conflicts and, if clean, interactively confirm an automatic merge.
 
+#### Dry-run JSON fields
+
+- import-branch preview includes:
+	- `action`, `as_branch`, `source_ref`, `remote`
+	- `head`: SHA of the imported branch tip
+	- `source_summary`: quick provenance of the imported branch
+		- `commit_count`: integer
+		- `top_level_paths`: up to 50 entries from the branch root
+		- `top_level_paths_total`: total entries
+		- `top_level_paths_truncated`: true if truncated
+
+- merge-preview includes:
+	- `target`, `source`, `no_ff`, `squash`, `conflicts`
+	- `allow_unrelated_histories`, `auto_allow_unrelated_histories`, `trailers`
+	- `source_summary`: same shape as above
+	- `note`: reason when merge-base is unknown
+
 ## Notes and assumptions
 
 - Assumes git-filter-repo is installed and available as either `git filter-repo` or `git-filter-repo`.

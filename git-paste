@@ -211,16 +211,40 @@ def main():
             pass
 
     import_head_sha: str | None = None
+
+    def summarize_branch(repo_path: Path, branch: str) -> dict:
+        try:
+            cnt = run(["git", "rev-list", "--count", branch], cwd=repo_path, capture_output=True).stdout.strip()
+            commit_count = int(cnt) if cnt else 0
+        except Exception:
+            commit_count = 0
+        try:
+            names = run(["git", "ls-tree", "--name-only", branch], cwd=repo_path, capture_output=True).stdout.splitlines()
+        except Exception:
+            names = []
+        total = len(names)
+        MAX_SHOW = 50
+        paths = names[:MAX_SHOW]
+        return {
+            "commit_count": commit_count,
+            "top_level_paths": paths,
+            "top_level_paths_total": total,
+            "top_level_paths_truncated": bool(total > MAX_SHOW),
+        }
     try:
         if refspec:
             if args.dry_run:
-                # Verify fetch-ability and existence of ref in bundle without creating branch
-                # Use ls-remote-like list-heads already obtained; simulate branch name
+                # In dry-run, fetch the selected ref into the temp clone to inspect summary safely
+                run(["git", "fetch", remote_name, f"{refspec}:{as_branch}"], cwd=work_repo)
+                import_head_sha = run(["git", "rev-parse", as_branch], cwd=work_repo, capture_output=True).stdout.strip()
+                summary = summarize_branch(work_repo, as_branch)
                 print(json.dumps({
                     "action": "import-branch",
                     "as_branch": as_branch,
                     "source_ref": refspec,
                     "remote": remote_name,
+                    "head": import_head_sha,
+                    "source_summary": summary,
                 }, indent=2))
             else:
                 run(["git", "fetch", remote_name, f"{refspec}:{as_branch}"], cwd=work_repo)
@@ -229,11 +253,24 @@ def main():
         else:
             # Fallback: fetch all heads
             if args.dry_run:
+                run(["git", "fetch", remote_name, f"refs/heads/*:refs/remotes/{remote_name}/*"], cwd=work_repo)
+                # Pick a remote branch to base from
+                out = run(["git", "branch", "-r"], cwd=work_repo, capture_output=True)
+                rheads = [line.strip() for line in out.stdout.splitlines() if line.strip().startswith(f"{remote_name}/")]
+                if not rheads:
+                    print("Error: no heads found in bundle", file=sys.stderr)
+                    sys.exit(1)
+                src = rheads[0]
+                run(["git", "branch", as_branch, src], cwd=work_repo)
+                import_head_sha = run(["git", "rev-parse", as_branch], cwd=work_repo, capture_output=True).stdout.strip()
+                summary = summarize_branch(work_repo, as_branch)
                 print(json.dumps({
                     "action": "import-branch",
                     "as_branch": as_branch,
-                    "source_ref": "refs/heads/*",
+                    "source_ref": src,
                     "remote": remote_name,
+                    "head": import_head_sha,
+                    "source_summary": summary,
                 }, indent=2))
             else:
                 run(["git", "fetch", remote_name, f"refs/heads/*:refs/remotes/{remote_name}/*"], cwd=work_repo)
@@ -314,6 +351,8 @@ def main():
                 if base:
                     output = run(["git", "merge-tree", base, target_branch, as_branch], cwd=work_repo, capture_output=True).stdout
                     conflicts = ("<<<<<<<" in output or ">>>>>>>" in output)
+                # Summarize source branch
+                summary = summarize_branch(work_repo, as_branch)
                 print(json.dumps({
                     "action": "merge-preview",
                     "target": target_branch,
@@ -324,6 +363,7 @@ def main():
                     "allow_unrelated_histories": args.allow_unrelated_histories,
                     "auto_allow_unrelated_histories": (not base),
                     "trailers": bool(args.trailers),
+                    "source_summary": summary,
                     "note": None if base else "Could not determine merge-base; conflict status unknown"
                 }, indent=2))
                 if obvious_mode and conflicts is False:
