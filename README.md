@@ -53,7 +53,7 @@ Import a previously created bundle into a target repository. By default it creat
 Usage
 
 ```bash
-git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [--ref REF] [-b BRANCH] [--merge|-M|--squash|-s|--rebase|-R] [--no-ff|-F] [--message|-j MSG] [--dry-run|-d] [--allow-unrelated-histories|-U] [--prompt-merge|-p] [--trailers|-T]
+git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [--ref REF] [--list-refs|-L] [-b BRANCH] [--merge|-M|--squash|-s|--rebase|-R] [--no-ff|-F] [--message|-j MSG] [--dry-run|-d] [--allow-unrelated-histories|-U] [--prompt-merge|-p] [--trailers|-T]
 ```
 
 ### Default behavior
@@ -66,6 +66,25 @@ git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [--ref REF] [-b BRANCH] [-
 
 - Use `--ref` to pick a specific ref from the bundle (e.g., `--ref main` or `--ref refs/heads/main`).
 - If omitted, git-paste tries the metadata `default_branch` from the clip. If not available, it falls back to the first head in the bundle.
+
+### List refs in a bundle
+
+- Use `--list-refs` (`-L`) to print all refs in the bundle as JSON and exit.
+- If a metadata file is available, `default_ref` will be included based on the clip’s `default_branch`.
+
+Example:
+
+```bash
+git-paste ./clips/clip.bundle --list-refs
+# {
+#   "action": "list-refs",
+#   "bundle": "/abs/path/clips/clip.bundle",
+#   "refs": [
+#     {"sha": "abc123", "ref": "refs/heads/main"}
+#   ],
+#   "default_ref": "refs/heads/main"
+# }
+```
 
 ### Clipboard default and obvious mode
 

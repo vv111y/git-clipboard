@@ -47,6 +47,7 @@ def parse_args():
     p.add_argument("-b", "--branch", help="Branch to merge into (default: current branch)")
     p.add_argument("-a", "--as-branch", dest="as_branch", help="Name of branch to create from bundle (default: clip/<bundle-name>)")
     p.add_argument("--ref", dest="ref", help="Specific ref to import from the bundle (e.g. 'master' or 'refs/heads/master')")
+    p.add_argument("-L", "--list-refs", action="store_true", help="List refs in the bundle and exit (prints JSON)")
     p.add_argument("-M", "--merge", action="store_true", help="Merge the imported branch into --branch/current")
     p.add_argument("-s", "--squash", action="store_true", help="Use a squash merge")
     p.add_argument("-R", "--rebase", action="store_true", help="Rebase the imported branch onto --branch/current before merging")
@@ -125,6 +126,31 @@ def main():
     if not bundle.exists():
         print(f"Error: bundle not found: {bundle}", file=sys.stderr)
         sys.exit(1)
+
+    # If only listing refs, we don't need a git repo context
+    if args.list_refs:
+        # Read metadata if present to surface default_ref
+        meta_for_list = read_meta(args.meta, bundle)
+        out = run(["git", "bundle", "list-heads", str(bundle)], capture_output=True)
+        entries = []
+        for line in out.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                entries.append({"sha": parts[0], "ref": parts[1]})
+        def normalize_for_list(r: str) -> str:
+            return r if r.startswith("refs/") else f"refs/heads/{r}"
+        payload = {
+            "action": "list-refs",
+            "bundle": str(bundle),
+            "refs": entries,
+        }
+        if meta_for_list and meta_for_list.get("default_branch"):
+            payload["default_ref"] = normalize_for_list(meta_for_list["default_branch"])
+        print(json.dumps(payload, indent=2))
+        return
 
     repo = Path(args.repo).resolve()
     if not is_git_repo(repo):

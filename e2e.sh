@@ -14,13 +14,14 @@ DST3="$TMP_ROOT/dst3"
 DST4="$TMP_ROOT/dst4"
 DST5="$TMP_ROOT/dst5"
 DST6="$TMP_ROOT/dst6"
+DST7="$TMP_ROOT/dst7"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
 
-mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4" "$DST5" "$DST6"
+mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4" "$DST5" "$DST6" "$DST7"
 
 git -C "$SRC" init -q
 mkdir -p "$SRC/proj/a" "$SRC/proj/b"
@@ -132,5 +133,12 @@ echo "$LAST_MSG2" | sed -n '1,80p'
 echo "$LAST_MSG2" | grep -q "Clip-Bundle:" || { echo "ERROR: expected Clip-Bundle trailer in squash commit" >&2; exit 1; }
 echo "$LAST_MSG2" | grep -q "Clip-Ref:" || { echo "ERROR: expected Clip-Ref trailer in squash commit" >&2; exit 1; }
 echo "$LAST_MSG2" | grep -q "Clip-Head:" || { echo "ERROR: expected Clip-Head trailer in squash commit" >&2; exit 1; }
+
+# Scenario 8: List refs in bundle as JSON
+echo "== List refs =="
+LIST_JSON=$("$(pwd)/git-paste" "$CLIPS/$CLIP_NAME.bundle" --list-refs)
+echo "$LIST_JSON" | sed -n '1,60p'
+echo "$LIST_JSON" | grep -q '"action": "list-refs"' || { echo "ERROR: missing action in list-refs" >&2; exit 1; }
+echo "$LIST_JSON" | grep -q '"refs"' || { echo "ERROR: missing refs in list-refs" >&2; exit 1; }
 
 echo "E2E OK: $TMP_ROOT"
