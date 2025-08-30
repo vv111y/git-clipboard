@@ -239,23 +239,103 @@ def main():
     import_head_sha: str | None = None
 
     def summarize_branch(repo_path: Path, branch: str) -> dict:
+        """Summarize branch contents and history.
+
+        Returns commit count, top-level paths, and size estimates including
+        total file count, aggregate byte size, and a sample of largest files.
+        """
+        # Commits
         try:
             cnt = run(["git", "rev-list", "--count", branch], cwd=repo_path, capture_output=True).stdout.strip()
             commit_count = int(cnt) if cnt else 0
         except Exception:
             commit_count = 0
+        # Top-level (non-recursive) entry names for a quick glance
         try:
             names = run(["git", "ls-tree", "--name-only", branch], cwd=repo_path, capture_output=True).stdout.splitlines()
         except Exception:
             names = []
-        total = len(names)
-        MAX_SHOW = 50
-        paths = names[:MAX_SHOW]
+        total_top = len(names)
+        MAX_TOP = 50
+        top_paths = names[:MAX_TOP]
+        # File inventory (recursive) with sizes
+        file_count = 0
+        total_size = 0
+        largest: list[tuple[int, str]] = []  # (size, path)
+        try:
+            out = run(["git", "ls-tree", "-r", "--long", branch], cwd=repo_path, capture_output=True).stdout
+            for line in out.splitlines():
+                # format: "<mode> <type> <sha> <size>\t<path>"
+                try:
+                    meta, path = line.split("\t", 1)
+                    parts = meta.split()
+                    if len(parts) >= 4 and parts[1] == "blob":
+                        size = int(parts[3]) if parts[3].isdigit() else 0
+                        file_count += 1
+                        total_size += size
+                        # track top 10 by size
+                        if len(largest) < 10:
+                            largest.append((size, path))
+                            largest.sort(reverse=True)
+                        else:
+                            if size > largest[-1][0]:
+                                largest[-1] = (size, path)
+                                largest.sort(reverse=True)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        largest_files = [{"path": p, "size": s} for s, p in largest]
         return {
             "commit_count": commit_count,
-            "top_level_paths": paths,
-            "top_level_paths_total": total,
-            "top_level_paths_truncated": bool(total > MAX_SHOW),
+            "top_level_paths": top_paths,
+            "top_level_paths_total": total_top,
+            "top_level_paths_truncated": bool(total_top > MAX_TOP),
+            "file_count": file_count,
+            "total_size_bytes": total_size,
+            "largest_files": largest_files,
+        }
+
+    def diff_sampling(repo_path: Path, left: str, right: str) -> dict:
+        """Summarize changes from left..right with a small sample.
+
+        Includes files_changed, insertions, deletions and a sample of up to 50 changed entries.
+        """
+        # Sample list
+        changes_sample = []
+        try:
+            ns = run(["git", "diff", "--name-status", "--find-renames=50%", f"{left}..{right}"], cwd=repo_path, capture_output=True).stdout
+            for line in ns.splitlines()[:50]:
+                parts = line.split("\t")
+                if not parts:
+                    continue
+                code = parts[0]
+                if code.startswith("R") and len(parts) >= 3:
+                    changes_sample.append({"status": "R", "from": parts[1], "to": parts[2]})
+                elif len(parts) >= 2:
+                    changes_sample.append({"status": code, "path": parts[1]})
+        except Exception:
+            pass
+        # Totals from shortstat
+        files_changed = insertions = deletions = 0
+        try:
+            ss = run(["git", "diff", "--shortstat", f"{left}..{right}"], cwd=repo_path, capture_output=True).stdout.strip()
+            # Example: "3 files changed, 10 insertions(+), 2 deletions(-)"
+            import re as _re
+            m_files = _re.search(r"(\d+) files? changed", ss)
+            m_ins = _re.search(r"(\d+) insertions?\(\+\)", ss)
+            m_del = _re.search(r"(\d+) deletions?\(-\)", ss)
+            files_changed = int(m_files.group(1)) if m_files else 0
+            insertions = int(m_ins.group(1)) if m_ins else 0
+            deletions = int(m_del.group(1)) if m_del else 0
+        except Exception:
+            pass
+        return {
+            "range": f"{left}..{right}",
+            "files_changed": files_changed,
+            "insertions": insertions,
+            "deletions": deletions,
+            "changes_sample": changes_sample,
         }
     try:
         if refspec:
@@ -379,6 +459,8 @@ def main():
                     conflicts = ("<<<<<<<" in output or ">>>>>>>" in output)
                 # Summarize source branch
                 summary = summarize_branch(work_repo, as_branch)
+                # Diff sampling (use base..source when available, else target..source)
+                diff = diff_sampling(work_repo, base if base else target_branch, as_branch)
                 print(json.dumps({
                     "action": "merge-preview",
                     "target": target_branch,
@@ -390,6 +472,7 @@ def main():
                     "auto_allow_unrelated_histories": (not base),
                     "trailers": bool(args.trailers),
                     "source_summary": summary,
+                    "diff_summary": diff,
                     "note": None if base else "Could not determine merge-base; conflict status unknown"
                 }, indent=2))
                 if obvious_mode and conflicts is False:
