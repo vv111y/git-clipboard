@@ -5,7 +5,43 @@ Convenience CLI wrappers to cut and paste Git history using git-filter-repo and 
 - git-cut: produce a portable bundle containing only selected paths and their full history.
 - git-paste: import that bundle into another repository, preserving history and optionally merging.
 
-The heavy lifting is done by git-filter-repo; these commands try to make common flows one-liners.
+The heavy lifting is done by git-filter-repo; these commands make common flows feel like a simple clipboard.
+
+## Minimal clipboard flow
+
+Copy a couple of paths (with full history) from one repo and paste them into another — no extra flags.
+
+```bash
+# In a source repo
+git-cut fileA dirB
+
+# In a target repo
+git-paste
+```
+
+Example output (abbreviated):
+
+```text
+/abs/path/.git-clipboard/clip-20250101-120000.bundle
+/abs/path/.git-clipboard/clip-20250101-120000.json
+Imported branch: clip/clip-20250101-120000
+{
+	"action": "merge-preview",
+	"target": "main",
+	"source": "clip/clip-20250101-120000",
+	"no_ff": false,
+	"squash": false,
+	"conflicts": false,
+	"allow_unrelated_histories": false,
+	"auto_allow_unrelated_histories": false,
+	"trailers": false,
+	"note": null
+}
+Auto-merge now? [y/N]: y
+Merged clip/clip-20250101-120000 into main
+```
+
+That’s it: cut some paths, paste them, confirm merge if it’s clean. If a merge might conflict (or histories are unrelated), you’ll see a preview and no auto-merge is attempted.
 
 ## Install
 
@@ -131,7 +167,7 @@ git-paste ../clips/clip.bundle --merge --allow-unrelated-histories --message "Im
 ### Dry-run JSON fields
 
 - import-branch: action, as_branch, source_ref, remote, head, source_summary
-	- source_summary now includes: commit_count, top_level_paths (+ totals), file_count, total_size_bytes, largest_files[{path,size}]
+  - source_summary now includes: commit_count, top_level_paths (+ totals), file_count, total_size_bytes, largest_files[{path,size}]
 - merge-preview: action, target, source, no_ff, squash, conflicts, allow_unrelated_histories, auto_allow_unrelated_histories, trailers, source_summary, diff_summary, note
 	- diff_summary: range, files_changed, insertions, deletions, changes_sample (up to 50 items; includes rename tuples)
 	- head: SHA of the imported branch tip
@@ -178,15 +214,6 @@ Quick smoke test and demo:
 bash ./e2e.sh
 ```
 
-Minimal clipboard flow:
-
-```bash
-# In a source repo
-git-cut some/path --to-subdir imported
-
-# In a target repo
-git-paste   # uses the last clip; if clean, confirm to auto-merge
-```
 
 ## Tests
 

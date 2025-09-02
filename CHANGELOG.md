@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.2 — 2025-09-02
+
+Docs-only update to emphasize the minimal clipboard flow.
+
+### Docs (v0.2.2)
+
+- README: lead with the truly minimal workflow (git-cut fileA dirB → git-paste) and add an abbreviated example output showing the auto-merge prompt.
+
 ## v0.2.1 — 2025-08-30
 
 Packaging and richer dry-run previews.
