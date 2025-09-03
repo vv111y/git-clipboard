@@ -113,6 +113,104 @@ def detect_default_branch(repo_dir: Path) -> str | None:
     return None
 
 
+def list_tracked_files(repo_dir: Path, path: str) -> list[str]:
+    """List tracked files matching a path (file or directory).
+
+    Returns repo-root relative paths.
+    """
+    try:
+        out = run(["git", "ls-files", "--", path], cwd=repo_dir, capture_output=True).stdout
+        return [line.strip() for line in out.splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
+def discover_rename_chain(repo_dir: Path, file_path: str) -> set[str]:
+    """Discover prior names of a tracked file by following renames.
+
+    Uses `git log --follow --name-status` and collects old/new paths from R* entries.
+    Returns a set including the provided file_path and any discovered historical names.
+    """
+    names: set[str] = set()
+    names.add(file_path)
+    try:
+        out = run(
+            [
+                "git",
+                "log",
+                "--follow",
+                "--name-status",
+                "--diff-filter=R",
+                "--pretty=format:",
+                "--",
+                file_path,
+            ],
+            cwd=repo_dir,
+            capture_output=True,
+        ).stdout
+        for line in out.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if parts and parts[0].startswith("R") and len(parts) >= 3:
+                oldp = parts[1].strip()
+                newp = parts[2].strip()
+                if oldp:
+                    names.add(oldp)
+                if newp:
+                    names.add(newp)
+    except Exception:
+        pass
+    return names
+
+
+def expand_paths_following_renames(repo_dir: Path, paths: list[str], max_files: int = 1000) -> tuple[list[str], dict[str, list[str]], list[str]]:
+    """Expand input paths to include historical names across renames.
+
+    For files: follow renames via discover_rename_chain.
+    For directories: enumerate tracked files under the dir and follow renames for each file (capped by max_files).
+
+    Returns (expanded_paths, details_map, warnings)
+    - expanded_paths: unique list of repo-root relative paths to pass to filter-repo.
+    - details_map: mapping input path -> list of discovered names (including the input itself).
+    - warnings: any warning strings encountered (e.g., directory too large to follow).
+    """
+    expanded: set[str] = set()
+    details: dict[str, list[str]] = {}
+    warns: list[str] = []
+    for p in paths:
+        # Normalize path as provided (repo-root relative)
+        tracked = list_tracked_files(repo_dir, p)
+        if not tracked:
+            # Path might be untracked or not present at HEAD; still include as-is
+            expanded.add(p)
+            details[p] = [p]
+            continue
+        # If p resolves to multiple files (directory or glob-like path), handle as directory case
+        if len(tracked) == 1 and tracked[0] == p:
+            # Single file case
+            chain = discover_rename_chain(repo_dir, p)
+            expanded.update(chain)
+            details[p] = sorted(chain)
+        else:
+            # Directory or multi-file path
+            files = tracked
+            if len(files) > max_files:
+                warns.append(f"Skipping follow-renames for '{p}' – too many files ({len(files)} > {max_files})")
+                expanded.add(p)
+                details[p] = [p]
+                continue
+            agg: set[str] = set()
+            for f in files:
+                agg.update(discover_rename_chain(repo_dir, f))
+            if not agg:
+                agg.add(p)
+            expanded.update(agg)
+            details[p] = sorted(agg)
+    return sorted(expanded), details, warns
+
+
 def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description="Create a Git bundle of selected paths with full history.")
     parser.add_argument("paths", nargs="+", help="File or directory paths to include (relative to repo root)")
@@ -125,6 +223,8 @@ def main(argv: list[str] | None = None):
     parser.add_argument("-k", "--keep-temp", action="store_true", help="Keep temporary clone for debugging")
     parser.add_argument("-p", "--prune-source", action="store_true", help="After a successful cut, delete the specified paths from the source repo and commit the removal")
     parser.add_argument("-A", "--require-ack", default=None, help="Path to an ack file produced by git-paste --ack; if provided, pruning only proceeds if ack exists")
+    parser.add_argument("--follow-renames", dest="follow_renames", action="store_true", default=True, help="Follow file renames to include historical names (default: on)")
+    parser.add_argument("--no-follow-renames", dest="follow_renames", action="store_false", help="Do not follow renames for provided paths")
 
     args = parser.parse_args(argv)
 
@@ -146,27 +246,42 @@ def main(argv: list[str] | None = None):
         print(f"Error: {bundle_path.name} or {meta_path.name} already exists in {out_dir}. Use --force to overwrite.", file=sys.stderr)
         sys.exit(1)
 
+    # Prepare path expansion (follow renames) preview from current repo state
+    expanded_paths: list[str] = list(args.paths)
+    details_map: dict[str, list[str]] = {p: [p] for p in args.paths}
+    warnings_list: list[str] = []
+    if args.dry_run and args.follow_renames:
+        try:
+            # Use the source repo for analysis during dry-run
+            expanded_paths, details_map, warnings_list = expand_paths_following_renames(src_repo, args.paths)
+        except Exception:
+            pass
+
     if args.dry_run:
         try:
-            rev_count = run(["git", "rev-list", "--all", "--count", "--", *args.paths], cwd=src_repo, capture_output=True).stdout.strip()
+            rev_count = run(["git", "rev-list", "--all", "--count", "--", *expanded_paths], cwd=src_repo, capture_output=True).stdout.strip()
         except Exception:
             rev_count = "unknown"
         try:
-            sample = run(["git", "log", "--oneline", "-n", "5", "--", *args.paths], cwd=src_repo, capture_output=True).stdout.strip()
+            sample = run(["git", "log", "--oneline", "-n", "5", "--", *expanded_paths], cwd=src_repo, capture_output=True).stdout.strip()
         except Exception:
             sample = ""
         mapping = []
-        for p in args.paths:
+        for p in expanded_paths:
             dst = f"{args.to_subdir.rstrip('/')}/{p}" if args.to_subdir else p
             mapping.append((p, dst))
         plan = {
             "repo": str(src_repo),
             "paths": args.paths,
+            "expanded_paths": expanded_paths if args.follow_renames else args.paths,
             "to_subdir": args.to_subdir,
+            "follow_renames": bool(args.follow_renames),
+            "follow_details": details_map if args.follow_renames else {},
             "commit_count_touching_paths": rev_count,
             "sample_commits": sample.splitlines(),
             "path_mapping_preview": [{"from": src, "to": dst} for src, dst in mapping],
             "outputs": {"bundle": str(bundle_path), "metadata": str(meta_path), "out_dir": str(out_dir)},
+            "warnings": warnings_list,
             "note": "No files created due to --dry-run",
         }
         print(json.dumps(plan, indent=2))
@@ -177,9 +292,22 @@ def main(argv: list[str] | None = None):
     try:
         run(["git", "clone", "--no-local", "--no-hardlinks", str(src_repo), str(temp_repo)])
 
+        # Expand paths (follow renames) in temp repo if enabled
+        if args.follow_renames:
+            try:
+                expanded_paths, details_map, warnings_list = expand_paths_following_renames(temp_repo, args.paths)
+            except Exception:
+                expanded_paths = list(args.paths)
+                details_map = {p: [p] for p in args.paths}
+                warnings_list = []
+        else:
+            expanded_paths = list(args.paths)
+            details_map = {p: [p] for p in args.paths}
+            warnings_list = []
+
         filter_cmd = list(filter_repo_cmd)
         filter_cmd += ["--force"]
-        for p in args.paths:
+        for p in expanded_paths:
             filter_cmd += ["--path", p]
         if args.to_subdir:
             filter_cmd += ["--to-subdirectory-filter", args.to_subdir]
@@ -198,13 +326,16 @@ def main(argv: list[str] | None = None):
             "created_at": _dt.datetime.now().isoformat(),
             "source_repo": str(src_repo),
             "paths": args.paths,
+            "expanded_paths": expanded_paths,
             "to_subdir": args.to_subdir,
+            "follow_renames": bool(args.follow_renames),
             "bundle": str(bundle_path),
             "git_version": git_ver,
             "filter_repo_invocation": " ".join(filter_repo_cmd),
             "default_branch": default_branch,
             "source_remotes": gather_repo_remotes(src_repo),
             "ack_file_suggestion": str(meta_path.with_suffix('.ack')),
+            "warnings": warnings_list,
         }
         if meta_path.exists() and args.force:
             meta_path.unlink()

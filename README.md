@@ -73,6 +73,7 @@ git-cut [PATH ...] [--repo REPO] [--to-subdir DIR] [--out-dir DIR] [--name NAME]
 - -n/--name: base filename for the outputs (default: clip-YYYYmmdd-HHMMSS)
 - -f/--force: overwrite existing outputs
 - -d/--dry-run: print a JSON plan without creating output files
+- --no-follow-renames: by default git-cut follows file renames and includes historical names so history isn’t lost across moves; use this to disable
 
 ### Outputs
 
@@ -95,6 +96,7 @@ git-paste [BUNDLE] [-m META.json] [-r REPO] [-a NAME] [--ref REF] [--list-refs|-
 - Creates a branch `clip/<bundle-base-name>` from the bundle's first head
 - If --merge/--squash/--rebase is given, merges into the current branch (or --branch)
 - Cleans up a temporary remote used for fetching from the bundle
+- Merges allow unrelated histories by default (you can still dry-run to preview conflicts first)
 
 ### Ref selection
 
@@ -161,7 +163,7 @@ git-paste ../clips/clip.bundle --merge --allow-unrelated-histories --message "Im
 ### Notes for dry-run
 
 - With `--dry-run`, paste clones the target repo into a temporary directory, simulates the import and prints a JSON summary, and previews merge conflicts using `git merge-tree` when possible. The real repo is not modified.
-- Use `--allow-unrelated-histories` when you later perform a real merge of unrelated histories (often required for fresh repos).
+- Real merges allow unrelated histories by default; this is typically what you want for cut/paste between repos.
 - Use `--prompt-merge` to preview conflicts and, if clean, interactively confirm an automatic merge.
 
 ### Dry-run JSON fields
@@ -174,8 +176,8 @@ git-paste ../clips/clip.bundle --merge --allow-unrelated-histories --message "Im
 	- source_summary: quick provenance of the imported branch
 	- commit_count: integer
 	- top_level_paths: up to 50 entries from the branch root
-	- top_level_paths_total: total entries
-	- top_level_paths_truncated: true if truncated
+		- top_level_paths_total: total entries
+		- top_level_paths_truncated: true if truncated
 
 - merge-preview includes:
 	- target, source, no_ff, squash, conflicts

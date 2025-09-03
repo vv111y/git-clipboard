@@ -15,6 +15,7 @@ DST4="$TMP_ROOT/dst4"
 DST5="$TMP_ROOT/dst5"
 DST6="$TMP_ROOT/dst6"
 DST7="$TMP_ROOT/dst7"
+DST8="$TMP_ROOT/dst8"
 
 cleanup() {
   rm -rf "$TMP_ROOT"
@@ -57,7 +58,7 @@ git_clipboard_cmd() {
 }
 
 setup_fixture() {
-  mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4" "$DST5" "$DST6" "$DST7"
+  mkdir -p "$SRC" "$DST" "$CLIPS" "$DST2" "$DST3" "$DST4" "$DST5" "$DST6" "$DST7" "$DST8"
 
   git -C "$SRC" init -q
   mkdir -p "$SRC/proj/a" "$SRC/proj/b"
@@ -196,6 +197,37 @@ scenario_list_refs() {
   echo "$LIST_JSON" | grep -q '"refs"' || { echo "ERROR: missing refs in list-refs" >&2; exit 1; }
 }
 
+scenario_follow_renames() {
+  # Scenario 9: Follow renames preserves pre-rename history
+  # Create a file, rename it, then edit; cut only the new name and ensure the original commit appears after paste
+  BR_SRC=$(git -C "$SRC" symbolic-ref -q --short HEAD || echo master)
+  git -C "$SRC" checkout -q "$BR_SRC"
+  mkdir -p "$SRC/rename/a"
+  echo "v1" > "$SRC/rename/a/old.txt"
+  git -C "$SRC" add -A && git -C "$SRC" commit -qm "rn: add old.txt"
+  git -C "$SRC" mv "$SRC/rename/a/old.txt" "$SRC/rename/a/new.txt"
+  git -C "$SRC" commit -qm "rn: rename old.txt -> new.txt"
+  echo "v2" >> "$SRC/rename/a/new.txt"
+  git -C "$SRC" add -A && git -C "$SRC" commit -qm "rn: edit new.txt"
+
+  CLIP_RN="clip-rename"
+  git_cut rename/a/new.txt --repo "$SRC" --out-dir "$CLIPS" --name "$CLIP_RN"
+  [ -s "$CLIPS/$CLIP_RN.bundle" ]
+
+  git -C "$DST8" init -q
+  git -C "$DST8" commit --allow-empty -qm "chore: initial"
+  git_paste "$CLIPS/$CLIP_RN.bundle" --repo "$DST8" --merge --message "Import rename clip" | sed -n '1,120p'
+
+  echo "== Follow renames log =="
+  LOG=$(git -C "$DST8" log --oneline --follow -- rename/a/new.txt | sed -n '1,80p')
+  echo "$LOG"
+  echo "$LOG" | grep -q "rename old.txt -> new.txt" || { echo "ERROR: missing rename commit in path-follow log" >&2; exit 1; }
+  # Verify both rename and later edit commits are present on the imported clip branch
+  BRLOG=$(git -C "$DST8" log --oneline clip/clip-rename | sed -n '1,80p')
+  echo "$BRLOG" | grep -q "rn: rename old.txt -> new.txt" || { echo "ERROR: missing rename commit on clip branch" >&2; exit 1; }
+  echo "$BRLOG" | grep -q "rn: edit new.txt" || { echo "ERROR: missing edit commit on clip branch" >&2; exit 1; }
+}
+
 main() {
   setup_fixture
   scenario_clipboard_default
@@ -207,6 +239,7 @@ main() {
   scenario_merge_with_trailers
   scenario_squash_with_trailers
   scenario_list_refs
+  scenario_follow_renames
   echo "E2E OK: $TMP_ROOT"
 }
 
