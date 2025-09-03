@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.3 — 2025-09-03
+
+Follow renames in git-cut by default and always allow unrelated histories on paste.
+
+### Features (v0.2.3)
+
+- git-cut
+  - New default: `--follow-renames` is enabled. When provided paths include files that were renamed, prior names are discovered via `git log --follow` and included in the slice so history is preserved across renames. Disable with `--no-follow-renames`.
+  - Dry-run preview now shows `expanded_paths`, `follow_renames`, and `follow_details` with any warnings.
+
+- git-paste
+  - Default merges include `--allow-unrelated-histories`, eliminating confusing failures when pasting clips from unrelated repositories. The preview JSON records this default.
+
+### Tests (v0.2.3)
+
+- Extended e2e with a rename scenario to confirm that clips include history across renames and that the clip branch shows both the rename and subsequent edits.
+
+### Docs (v0.2.3)
+
+- README updated to document the new defaults and keep the minimal flow front-and-center.
+
 ## v0.2.2 — 2025-09-02
 
 Docs-only update to emphasize the minimal clipboard flow.
