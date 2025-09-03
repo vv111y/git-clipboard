@@ -45,7 +45,7 @@ def parse_args(argv: list[str] | None = None):
     p.add_argument("-F", "--no-ff", action="store_true", help="Disable fast-forward during merge")
     p.add_argument("-j", "--message", default=None, help="Custom merge commit message")
     p.add_argument("-d", "--dry-run", action="store_true", help="Preview import and potential merge/conflicts without changing the repo")
-    p.add_argument("-U", "--allow-unrelated-histories", action="store_true", help="Allow merging unrelated histories (recommended for imported clips)")
+    p.add_argument("-U", "--allow-unrelated-histories", action="store_true", help="Allow merging unrelated histories (default behavior)")
     p.add_argument("-p", "--prompt-merge", action="store_true", help="After creating import branch, prompt to auto-merge if preview is clean")
     p.add_argument("-T", "--trailers", action="store_true", help="Append clip metadata as commit message trailers on merge/squash commits")
     return p.parse_args(argv)
@@ -359,7 +359,6 @@ def main(argv: list[str] | None = None):
 
         if args.merge or args.squash or args.rebase or args.dry_run or obvious_mode:
             repo_has_commits = has_commits(work_repo)
-            target_branch = args.branch or (current_branch(work_repo) if repo_has_commits else None)
             if not repo_has_commits:
                 if args.dry_run or obvious_mode:
                     print(json.dumps({
@@ -372,6 +371,8 @@ def main(argv: list[str] | None = None):
                 else:
                     print("Target repo has no commits; skipping merge. Imported branch created.")
                 return 0
+            # Now safe to resolve target branch name as a string
+            target_branch: str = args.branch or current_branch(work_repo)
             if target_branch == "HEAD":
                 print("Error: cannot merge onto detached HEAD. Specify --branch.", file=sys.stderr)
                 return 1
@@ -391,13 +392,12 @@ def main(argv: list[str] | None = None):
                     run(["git", "rebase", target_branch, as_branch], cwd=work_repo)
                     run(["git", "checkout", target_branch], cwd=work_repo)
 
-            merge_cmd = ["git", "merge"]
+            # Always allow unrelated histories by default
+            merge_cmd = ["git", "merge", "--allow-unrelated-histories"]
             if args.squash:
                 merge_cmd.append("--squash")
             if args.no_ff:
                 merge_cmd.append("--no-ff")
-            if args.allow_unrelated_histories:
-                merge_cmd.append("--allow-unrelated-histories")
             if args.message:
                 merge_cmd += ["-m", args.message]
                 if args.trailers:
@@ -422,7 +422,7 @@ def main(argv: list[str] | None = None):
                     "no_ff": args.no_ff,
                     "squash": args.squash,
                     "conflicts": conflicts,
-                    "allow_unrelated_histories": args.allow_unrelated_histories,
+                    "allow_unrelated_histories": True,
                     "auto_allow_unrelated_histories": (not base),
                     "trailers": bool(args.trailers),
                     "source_summary": summary,
@@ -434,8 +434,6 @@ def main(argv: list[str] | None = None):
                     if ans not in ("y", "yes"):
                         print("Merge skipped by user.")
                         return 0
-                    if not base and "--allow-unrelated-histories" not in merge_cmd:
-                        merge_cmd.insert(2, "--allow-unrelated-histories")
                     run(merge_cmd, cwd=work_repo)
                     if args.squash:
                         msg = args.message or f"Squash import from {as_branch}"
@@ -469,7 +467,7 @@ def main(argv: list[str] | None = None):
                     "no_ff": args.no_ff,
                     "squash": args.squash,
                     "conflicts": conflicts,
-                    "allow_unrelated_histories": args.allow_unrelated_histories,
+                    "allow_unrelated_histories": True,
                     "trailers": bool(args.trailers),
                     "note": None if base else "Could not determine merge-base; conflict status unknown"
                 }, indent=2))
@@ -486,8 +484,6 @@ def main(argv: list[str] | None = None):
                     base = run(["git", "merge-base", target_branch, as_branch], cwd=work_repo, capture_output=True).stdout.strip()
                 except Exception:
                     base = ""
-                if not base and "--allow-unrelated-histories" not in merge_cmd:
-                    merge_cmd.insert(2, "--allow-unrelated-histories")
                 run(merge_cmd, cwd=work_repo)
 
             if args.squash and not (args.dry_run or obvious_mode):
